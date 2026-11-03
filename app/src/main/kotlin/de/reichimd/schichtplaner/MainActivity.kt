@@ -19,6 +19,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -154,14 +155,19 @@ private fun Hauptbereich() {
                     val aktiv = b == bereich
                     TextButton(
                         onClick = { bereich = b; bearbeitet = false },
+                        contentPadding = PaddingValues(horizontal = 2.dp, vertical = 8.dp),
                         modifier = Modifier
                             .weight(1f)
-                            .height(56.dp)
+                            .heightIn(min = 56.dp)
                             .testTag("tab-${b.titel}"),
                     ) {
+                        // Vier Reiter: bei großer Schrift lieber kleiner als umgebrochen.
                         Text(
                             b.titel,
                             fontSize = 15.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Visible,
                             fontWeight = if (aktiv) FontWeight.Bold else FontWeight.Normal,
                             color = if (aktiv) Akzent else TextLeise,
                         )
@@ -196,7 +202,12 @@ internal class PlanViewModel(app: Application) : AndroidViewModel(app) {
                 ladenStore.zustand.map { it.laden },
                 wuenscheStore.zustand.map { it.eintraege },
             ) { team, laden, wuensche -> Triple(team, laden, wuensche) }.distinctUntilChanged().drop(1).collect {
-                if (zustand is Zustand.Fertig) zustand = Zustand.Leer
+                when (zustand) {
+                    is Zustand.Fertig -> zustand = Zustand.Leer
+                    // Während des Rechnens geändert (z. B. Urlaub nachgetragen): danach gleich neu rechnen.
+                    Zustand.Rechnet -> nochmal = true
+                    else -> Unit
+                }
             }
         }
     }
@@ -205,9 +216,13 @@ internal class PlanViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var woche by mutableIntStateOf(0)
 
+    /** Eingaben haben sich während der Berechnung geändert: Ergebnis wäre veraltet. */
+    private var nochmal = false
+
     fun erstellen() {
         if (zustand is Zustand.Rechnet) return
         zustand = Zustand.Rechnet
+        nochmal = false
         woche = 0
         viewModelScope.launch {
             // Mit dem gespeicherten Team, solange noch keins angelegt ist mit dem erfundenen Beispiel.
@@ -227,6 +242,10 @@ internal class PlanViewModel(app: Application) : AndroidViewModel(app) {
             } catch (t: Throwable) {
                 Zustand.Fehler("${t::class.java.simpleName}: ${t.message}")
             }
+            if (nochmal) {
+                zustand = Zustand.Leer
+                erstellen()
+            }
         }
     }
 }
@@ -238,6 +257,7 @@ internal fun PlanScreen(vm: PlanViewModel = viewModel()) {
     val context = LocalContext.current
     val team by TeamStore.get(context).zustand.collectAsState()
     val laden by LadenStore.get(context).zustand.collectAsState()
+    val wuensche by WuenscheStore.get(context).zustand.collectAsState()
 
     Column(
         Modifier
@@ -263,7 +283,7 @@ internal fun PlanScreen(vm: PlanViewModel = viewModel()) {
                     if (laden.eingerichtet) "Laden und Schichten wie unter „Laden“ eingestellt."
                     else "Laden und Schichten sind noch Beispielwerte (unter „Laden“ prüfen).",
                 )
-                if (team.team.isNotEmpty()) {
+                if (team.team.isNotEmpty() && wuensche.bearbeitbar) {
                     append(" Urlaub und Wünsche aus dem Kalender unter „Wünsche“ werden berücksichtigt.")
                 }
             },
@@ -275,6 +295,13 @@ internal fun PlanScreen(vm: PlanViewModel = viewModel()) {
         UpdateBanner()
 
         laden.meldung?.let { Hinweis("Laden: $it", Modifier.padding(horizontal = 8.dp)) }
+        if (!wuensche.laedt && wuensche.nurLesen) {
+            Hinweis(
+                "Der Wünsche-Kalender ist gerade gesperrt, der Plan rechnet ohne Urlaub und Wünsche. " +
+                    "Mehr dazu unter „Wünsche“.",
+                Modifier.padding(horizontal = 8.dp),
+            )
+        }
         if (Shop.problems(laden.laden).isNotEmpty()) {
             Hinweis("Die Laden-Einstellungen haben Fehler. Bitte unter „Laden“ korrigieren.", Modifier.padding(horizontal = 8.dp))
         }

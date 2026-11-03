@@ -502,15 +502,18 @@ private fun MitarbeiterBearbeiten(
     if (loeschenFrage && original != null) {
         val eintraege by wuensche.zustand.collectAsState()
         val anzahl = Wishes.ofEmployee(eintraege.eintraege, original.id).size
+        // Ist der Kalender gesperrt, bleiben die Einträge in der Datei, werden aber nirgends mehr genutzt.
+        val kalenderOk = eintraege.bearbeitbar
         AlertDialog(
             onDismissRequest = { loeschenFrage = false },
             title = { Text("${original.name} löschen?") },
             text = {
                 Text(
                     "${original.name} wird aus dem Team entfernt und nicht mehr eingeplant." +
-                        when (anzahl) {
-                            0 -> ""
-                            1 -> " Der eine eingetragene Tag im Wünsche-Kalender wird mitgelöscht."
+                        when {
+                            !kalenderOk -> ""
+                            anzahl == 0 -> ""
+                            anzahl == 1 -> " Der eine eingetragene Tag im Wünsche-Kalender wird mitgelöscht."
                             else -> " Die $anzahl eingetragenen Tage im Wünsche-Kalender werden mitgelöscht."
                         },
                 )

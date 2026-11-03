@@ -9,9 +9,7 @@ import java.time.LocalDate
 import java.time.YearMonth
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertNull
-import kotlin.test.assertTrue
 
 class WishesTest {
 
@@ -83,15 +81,6 @@ class WishesTest {
         val feb = Wishes.monthGrid(YearMonth.of(2027, 2))
         assertEquals(28, feb.size)
         assertEquals(LocalDate.of(2027, 2, 1), feb[0])
-    }
-
-    @Test
-    fun blaetternIstBegrenzt() {
-        val heute = LocalDate.of(2026, 11, 3)
-        assertTrue(Wishes.canGoBack(YearMonth.of(2026, 11), heute))
-        assertFalse(Wishes.canGoBack(YearMonth.of(2026, 10), heute))
-        assertTrue(Wishes.canGoForward(YearMonth.of(2027, 10), heute))
-        assertFalse(Wishes.canGoForward(YearMonth.of(2027, 11), heute))
     }
 
     @Test

@@ -17,7 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -314,7 +314,7 @@ private fun MonatsKopf(monat: YearMonth, zurueck: (() -> Unit)?, weiter: (() -> 
             onClick = { zurueck?.invoke() },
             enabled = zurueck != null,
             modifier = Modifier
-                .size(48.dp)
+                .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                 .semantics { contentDescription = "Voriger Monat" },
             contentPadding = ButtonDefaults.TextButtonContentPadding,
         ) { Text("‹", fontSize = 22.sp, color = if (zurueck != null) Schrift else Rand) }
@@ -332,7 +332,7 @@ private fun MonatsKopf(monat: YearMonth, zurueck: (() -> Unit)?, weiter: (() -> 
             onClick = { weiter?.invoke() },
             enabled = weiter != null,
             modifier = Modifier
-                .size(48.dp)
+                .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                 .semantics { contentDescription = "Nächster Monat" },
             contentPadding = ButtonDefaults.TextButtonContentPadding,
         ) { Text("›", fontSize = 22.sp, color = if (weiter != null) Schrift else Rand) }

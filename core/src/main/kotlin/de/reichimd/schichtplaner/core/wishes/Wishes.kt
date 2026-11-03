@@ -102,12 +102,6 @@ object Wishes {
     /** Der Monat, den man beim Öffnen sieht: der Monat, in dem der nächste Plan beginnt. */
     fun startMonth(planStart: LocalDate): YearMonth = YearMonth.from(planStart)
 
-    fun canGoBack(month: YearMonth, today: LocalDate): Boolean =
-        month > YearMonth.from(today).minusMonths(MONTHS_BACK.toLong())
-
-    fun canGoForward(month: YearMonth, today: LocalDate): Boolean =
-        month < YearMonth.from(today).plusMonths(MONTHS_AHEAD.toLong())
-
     /**
      * Was der Planer bekommt: nur Einträge von Personen im Team und nur im Planungszeitraum.
      * Einträge gelöschter Personen oder anderer Monate dürfen das Soll nicht verfälschen.
