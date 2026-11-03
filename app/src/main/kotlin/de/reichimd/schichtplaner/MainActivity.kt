@@ -53,6 +53,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -366,9 +368,13 @@ private fun WochenKopf(ersterTag: LocalDate, woche: Int, wochen: Int, zurueck: (
 
 private val TAGE = listOf("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")
 
-/** Feste Zeilenhöhe, damit Namen links und Zellen im Blätterbereich genau nebeneinander liegen. */
-private val ZEILE = 46.dp
-private val NAMENSPALTE = 58.dp
+/**
+ * Mindesthöhe einer Zeile. Die echte Höhe wächst mit der Schriftgröße des Handys (siehe [zeilenHoehe]),
+ * damit Beginn und Ende immer ganz zu sehen sind und Namen und Zellen trotzdem genau nebeneinander liegen.
+ */
+private val ZEILE_MIN = 46.dp
+private val ZELLE_ZEILENHOEHE = 14.sp
+private val NAMENSPALTE = 64.dp
 private val ABSTAND = 3.dp
 
 /**
@@ -381,6 +387,9 @@ private fun WochenRaster(request: PlanningRequest, plan: Plan, pager: PagerState
     val zuteilung: Map<Pair<String, LocalDate>, Shift> = remember(plan) {
         plan.assignments.associate { (it.employeeId to it.shift.date) to it.shift }
     }
+
+    // Zwei Textzeilen plus Innenabstand, in der Schriftgröße des Handys.
+    val zeile = with(LocalDensity.current) { maxOf(ZEILE_MIN, (ZELLE_ZEILENHOEHE * 2).toDp() + 12.dp) }
 
     Column(verticalArrangement = Arrangement.spacedBy(ABSTAND)) {
         Row(horizontalArrangement = Arrangement.spacedBy(ABSTAND)) {
@@ -399,8 +408,15 @@ private fun WochenRaster(request: PlanningRequest, plan: Plan, pager: PagerState
         Row(horizontalArrangement = Arrangement.spacedBy(ABSTAND)) {
             Column(Modifier.width(NAMENSPALTE), verticalArrangement = Arrangement.spacedBy(ABSTAND)) {
                 request.employees.forEach { e ->
-                    Box(Modifier.height(ZEILE), contentAlignment = Alignment.CenterStart) {
-                        Text(e.name, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Schrift, maxLines = 1)
+                    Box(Modifier.height(zeile), contentAlignment = Alignment.CenterStart) {
+                        Text(
+                            e.name,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Schrift,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                 }
             }
@@ -417,7 +433,7 @@ private fun WochenRaster(request: PlanningRequest, plan: Plan, pager: PagerState
                     request.employees.forEach { e ->
                         Row(horizontalArrangement = Arrangement.spacedBy(ABSTAND)) {
                             (0L until 7L).forEach { d ->
-                                Zelle(zuteilung[e.id to ersterTag.plusDays(d)], Modifier.weight(1f))
+                                Zelle(zuteilung[e.id to ersterTag.plusDays(d)], Modifier.weight(1f).height(zeile))
                             }
                         }
                     }
@@ -437,7 +453,6 @@ private fun Zelle(shift: Shift?, modifier: Modifier) {
     }
     Column(
         modifier
-            .height(ZEILE)
             .background(farbe, RoundedCornerShape(6.dp))
             .border(1.dp, if (shift == null) Rand else farbe, RoundedCornerShape(6.dp))
             .padding(vertical = 3.dp),
@@ -445,10 +460,10 @@ private fun Zelle(shift: Shift?, modifier: Modifier) {
         verticalArrangement = Arrangement.Center,
     ) {
         if (shift == null) {
-            Text("frei", fontSize = 10.sp, color = TextLeise)
+            Text("frei", fontSize = 10.sp, lineHeight = ZELLE_ZEILENHOEHE, color = TextLeise)
         } else {
-            Text(shift.start.format(f), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Schrift)
-            Text(shift.end.format(f), fontSize = 10.sp, color = Schrift)
+            Text(shift.start.format(f), fontSize = 10.sp, lineHeight = ZELLE_ZEILENHOEHE, fontWeight = FontWeight.Bold, color = Schrift, maxLines = 1)
+            Text(shift.end.format(f), fontSize = 10.sp, lineHeight = ZELLE_ZEILENHOEHE, color = Schrift, maxLines = 1)
         }
     }
 }
