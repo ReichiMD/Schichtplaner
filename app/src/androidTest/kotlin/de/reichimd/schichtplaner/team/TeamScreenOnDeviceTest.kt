@@ -18,6 +18,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import de.reichimd.schichtplaner.wuensche.WuenscheStore
 import java.io.File
 import java.time.DayOfWeek
 
@@ -42,7 +43,7 @@ class TeamScreenOnDeviceTest {
     fun personAnlegenUndBearbeiten() {
         val store = TeamStore(dir)
         runBlocking { withTimeout(10_000) { store.warten() } }
-        compose.setContent { TeamBereich(store = store) }
+        compose.setContent { TeamBereich(store = store, wuensche = WuenscheStore(dir)) }
 
         compose.onNodeWithText("Noch niemand im Team.").assertIsDisplayed()
         compose.onNodeWithTag("neu").performClick()
@@ -81,7 +82,7 @@ class TeamScreenOnDeviceTest {
     fun ohneNameKommtEinHinweis() {
         val store = TeamStore(dir)
         runBlocking { withTimeout(10_000) { store.warten() } }
-        compose.setContent { TeamBereich(store = store) }
+        compose.setContent { TeamBereich(store = store, wuensche = WuenscheStore(dir)) }
 
         compose.onNodeWithTag("neu").performClick()
         compose.onNodeWithTag("speichern").performClick()
@@ -93,7 +94,7 @@ class TeamScreenOnDeviceTest {
     fun ohneSchichtStehtDerFehlerAmAbschnittUndVerschwindetBeimKorrigieren() {
         val store = TeamStore(dir)
         runBlocking { withTimeout(10_000) { store.warten() } }
-        compose.setContent { TeamBereich(store = store) }
+        compose.setContent { TeamBereich(store = store, wuensche = WuenscheStore(dir)) }
 
         compose.onNodeWithTag("neu").performClick()
         compose.onNodeWithTag("vorname").performTextInput("Ida")
@@ -117,7 +118,7 @@ class TeamScreenOnDeviceTest {
     fun beispielTeamLaden() {
         val store = TeamStore(dir)
         runBlocking { withTimeout(10_000) { store.warten() } }
-        compose.setContent { TeamBereich(store = store) }
+        compose.setContent { TeamBereich(store = store, wuensche = WuenscheStore(dir)) }
 
         compose.onNodeWithTag("beispiel").performClick()
         compose.onNodeWithTag("mitarbeiter-Conny").assertIsDisplayed()

@@ -52,11 +52,16 @@ object Planner {
         val weights = rules.weights
         val model = Model("Schichtplan")
 
-        val blocked = request.absences
+        // Nur Einträge im Zeitraum und von Personen im Plan: Urlaub in anderen Monaten darf das Soll nicht senken.
+        val ids = employees.map { it.id }.toSet()
+        val absences = request.absences.filter {
+            it.employeeId in ids && !it.date.isBefore(request.firstDay) && !it.date.isAfter(request.lastDay)
+        }
+        val blocked = absences
             .filter { it.type == AbsenceType.VACATION || it.type == AbsenceType.SICK }
             .map { it.employeeId to it.date }
             .toSet()
-        val wishes = request.absences
+        val wishes = absences
             .filter { it.type == AbsenceType.DAY_OFF_WISH }
             .map { it.employeeId to it.date }
             .toSet()

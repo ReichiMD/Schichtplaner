@@ -52,6 +52,13 @@ internal val Warnung = Color(0xFFFFF4E5)
 internal val Fehler = Color(0xFFB3261E)
 internal val FehlerHell = Color(0xFFFDECEA)
 
+// Wünsche-Kalender: Arten unterscheiden sich auch in der Helligkeit, nicht nur im Farbton.
+internal val Urlaub = Color(0xFF6E4FA0)
+internal val FreiWunsch = Color(0xFF2F6CB0)
+internal val FreiWunschHell = Color(0xFFDCE9F7)
+internal val Krank = Color(0xFFA23B2E)
+internal val KrankHell = Color(0xFFF6DEDA)
+
 /**
  * Abschnitt eines Formulars mit Überschrift. Mit [fehler] wird er rot umrandet und der Fehler steht
  * direkt unter der Überschrift, damit er nicht übersehen wird. [requester] erlaubt, ihn ins Bild zu holen.

@@ -1,9 +1,11 @@
 package de.reichimd.schichtplaner
 
+import de.reichimd.schichtplaner.core.Absence
 import de.reichimd.schichtplaner.core.Employee
 import de.reichimd.schichtplaner.core.PlanningRequest
 import de.reichimd.schichtplaner.core.shop.Shop
 import de.reichimd.schichtplaner.core.shop.ShopSettings
+import de.reichimd.schichtplaner.core.wishes.Wishes
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.temporal.TemporalAdjusters
@@ -30,10 +32,17 @@ object DemoData {
         today: LocalDate = LocalDate.now(),
         employees: List<Employee> = team,
         laden: ShopSettings = Shop.EXAMPLE,
-    ) = PlanningRequest(
-        firstDay = today.with(TemporalAdjusters.next(DayOfWeek.MONDAY)),
-        days = laden.planDays,
-        shop = laden.toConfig(),
-        employees = employees,
-    )
+        absences: List<Absence> = emptyList(),
+    ): PlanningRequest {
+        val firstDay = today.with(TemporalAdjusters.next(DayOfWeek.MONDAY))
+        val lastDay = firstDay.plusDays(laden.planDays.toLong() - 1)
+        return PlanningRequest(
+            firstDay = firstDay,
+            days = laden.planDays,
+            shop = laden.toConfig(),
+            employees = employees,
+            // Nur was in den Zeitraum fällt und zu Personen im Team gehört.
+            absences = Wishes.forPlan(absences, employees, firstDay, lastDay),
+        )
+    }
 }

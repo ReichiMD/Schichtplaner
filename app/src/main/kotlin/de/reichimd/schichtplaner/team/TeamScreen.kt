@@ -83,6 +83,9 @@ import de.reichimd.schichtplaner.ui.Stepper
 import de.reichimd.schichtplaner.ui.TextLeise
 import de.reichimd.schichtplaner.ui.TextMittel
 import de.reichimd.schichtplaner.core.team.Team
+import de.reichimd.schichtplaner.core.wishes.Wishes
+import de.reichimd.schichtplaner.wuensche.WuenscheStore
+import de.reichimd.schichtplaner.wuensche.eintraege
 import kotlinx.coroutines.launch
 import java.time.DayOfWeek
 import java.util.UUID
@@ -97,6 +100,7 @@ private const val NEU = "__neu__"
 @Composable
 internal fun TeamBereich(
     store: TeamStore = TeamStore.get(LocalContext.current),
+    wuensche: WuenscheStore = WuenscheStore.get(LocalContext.current),
     bearbeitetGerade: (Boolean) -> Unit = {},
 ) {
     val zustand by store.zustand.collectAsState()
@@ -118,6 +122,7 @@ internal fun TeamBereich(
             original = vorhanden,
             team = zustand.team,
             store = store,
+            wuensche = wuensche,
             schliessen = { offen = null },
         )
     }
@@ -282,7 +287,13 @@ private fun tageAusText(text: String) = text.mapNotNull { it.digitToIntOrNull() 
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MitarbeiterBearbeiten(original: Employee?, team: List<Employee>, store: TeamStore, schliessen: () -> Unit) {
+private fun MitarbeiterBearbeiten(
+    original: Employee?,
+    team: List<Employee>,
+    store: TeamStore,
+    wuensche: WuenscheStore,
+    schliessen: () -> Unit,
+) {
     var name by rememberSaveable { mutableStateOf(original?.name ?: "") }
     var stunden by rememberSaveable { mutableStateOf(original?.monthlyHours ?: 80) }
     var frueh by rememberSaveable { mutableStateOf(original?.canEarly ?: true) }
@@ -489,13 +500,26 @@ private fun MitarbeiterBearbeiten(original: Employee?, team: List<Employee>, sto
         )
     }
     if (loeschenFrage && original != null) {
+        val eintraege by wuensche.zustand.collectAsState()
+        val anzahl = Wishes.ofEmployee(eintraege.eintraege, original.id).size
         AlertDialog(
             onDismissRequest = { loeschenFrage = false },
             title = { Text("${original.name} löschen?") },
-            text = { Text("${original.name} wird aus dem Team entfernt und nicht mehr eingeplant.") },
+            text = {
+                Text(
+                    "${original.name} wird aus dem Team entfernt und nicht mehr eingeplant." +
+                        when (anzahl) {
+                            0 -> ""
+                            1 -> " Der eine eingetragene Tag im Wünsche-Kalender wird mitgelöscht."
+                            else -> " Die $anzahl eingetragenen Tage im Wünsche-Kalender werden mitgelöscht."
+                        },
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     loeschenFrage = false
+                    // Erst die Kalendereinträge, dann die Person: so bleibt nie etwas ohne Besitzer zurück.
+                    wuensche.personEntfernen(original.id)
                     store.loeschen(original.id)
                     schliessen()
                 }) { Text("Löschen", color = Akzent) }
