@@ -6,6 +6,15 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.key
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -56,12 +65,27 @@ import de.reichimd.schichtplaner.core.Planner
 import de.reichimd.schichtplaner.core.PlanningRequest
 import de.reichimd.schichtplaner.core.Shift
 import de.reichimd.schichtplaner.core.ShiftKind
+import de.reichimd.schichtplaner.core.shop.Shop
+import de.reichimd.schichtplaner.laden.LadenBereich
+import de.reichimd.schichtplaner.laden.LadenStore
+import de.reichimd.schichtplaner.laden.eingerichtet
+import de.reichimd.schichtplaner.laden.laden
 import de.reichimd.schichtplaner.team.TeamBereich
+import de.reichimd.schichtplaner.team.team
+import de.reichimd.schichtplaner.ui.Akzent
+import de.reichimd.schichtplaner.ui.Frueh
+import de.reichimd.schichtplaner.ui.Hintergrund
+import de.reichimd.schichtplaner.ui.Hinweis
+import de.reichimd.schichtplaner.ui.Rand
+import de.reichimd.schichtplaner.ui.Schrift
+import de.reichimd.schichtplaner.ui.Spaet
+import de.reichimd.schichtplaner.ui.TextLeise
 import de.reichimd.schichtplaner.team.TeamStore
 import de.reichimd.schichtplaner.update.UpdateBanner
 import de.reichimd.schichtplaner.update.VersionZeile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
@@ -72,14 +96,6 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.IsoFields
 
-private val Hintergrund = Color(0xFFFBF8F3)
-private val Schrift = Color(0xFF2B2620)
-private val TextLeise = Color(0xFF6B6258)
-private val Akzent = Color(0xFF8A3A12)
-private val Frueh = Color(0xFFF6D9B8)
-private val Spaet = Color(0xFFCFE0F3)
-private val Rand = Color(0xFFDDD3C4)
-private val Warnung = Color(0xFFFFF4E5)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -99,15 +115,15 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Bereich(val titel: String) { PLAN("Plan"), TEAM("Team") }
+private enum class Bereich(val titel: String) { PLAN("Plan"), TEAM("Team"), LADEN("Laden") }
 
-/** Untere Leiste mit Plan und Team. Beim Bearbeiten einer Person wird sie ausgeblendet. */
+/** Untere Leiste mit Plan, Team und Laden. Beim Bearbeiten (Person, Schicht, Zeiten) wird sie ausgeblendet. */
 @Composable
 private fun Hauptbereich() {
     var bereich by rememberSaveable { mutableStateOf(Bereich.PLAN) }
     var bearbeitet by remember { mutableStateOf(false) }
 
-    // Zurück im Team-Bereich führt erst zum Plan, statt die App zu schließen.
+    // Zurück im Team- oder Laden-Bereich führt erst zum Plan, statt die App zu schließen.
     BackHandler(enabled = bereich != Bereich.PLAN && !bearbeitet) { bereich = Bereich.PLAN }
 
     Column(Modifier.fillMaxSize()) {
@@ -115,9 +131,10 @@ private fun Hauptbereich() {
             when (bereich) {
                 Bereich.PLAN -> PlanScreen()
                 Bereich.TEAM -> TeamBereich(bearbeitetGerade = { bearbeitet = it })
+                Bereich.LADEN -> LadenBereich(bearbeitetGerade = { bearbeitet = it })
             }
         }
-        if (!(bereich == Bereich.TEAM && bearbeitet)) {
+        if (!(bereich != Bereich.PLAN && bearbeitet)) {
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -127,7 +144,7 @@ private fun Hauptbereich() {
                 Bereich.entries.forEach { b ->
                     val aktiv = b == bereich
                     TextButton(
-                        onClick = { bereich = b },
+                        onClick = { bereich = b; bearbeitet = false },
                         modifier = Modifier
                             .weight(1f)
                             .height(56.dp)
@@ -159,11 +176,15 @@ internal sealed interface Zustand {
  */
 internal class PlanViewModel(app: Application) : AndroidViewModel(app) {
     private val teamStore = TeamStore.get(app)
+    private val ladenStore = LadenStore.get(app)
 
     init {
-        // Ändert sich das Team, passt ein fertiger Plan nicht mehr: verwerfen statt Altes zu zeigen.
+        // Ändert sich Team oder Laden, passt ein fertiger Plan nicht mehr: verwerfen statt Altes zu zeigen.
         viewModelScope.launch {
-            teamStore.zustand.map { it.team }.distinctUntilChanged().drop(1).collect {
+            combine(
+                teamStore.zustand.map { it.team },
+                ladenStore.zustand.map { it.laden },
+            ) { team, laden -> team to laden }.distinctUntilChanged().drop(1).collect {
                 if (zustand is Zustand.Fertig) zustand = Zustand.Leer
             }
         }
@@ -180,10 +201,11 @@ internal class PlanViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             // Mit dem gespeicherten Team, solange noch keins angelegt ist mit dem erfundenen Beispiel.
             val team = teamStore.zustand.first { !it.laedt }.team
+            val laden = ladenStore.zustand.first { !it.laedt }.laden
             zustand = try {
                 // Der Planer rechnet einige Sekunden (höchstens 15 s): nie im UI-Thread.
                 withContext(Dispatchers.Default) {
-                    val request = if (team.isEmpty()) DemoData.request() else DemoData.request(employees = team)
+                    val request = DemoData.request(employees = team.ifEmpty { DemoData.team }, laden = laden)
                     val start = System.currentTimeMillis()
                     val plan = Planner.plan(request)
                     Zustand.Fertig(request, plan, System.currentTimeMillis() - start)
@@ -197,10 +219,13 @@ internal class PlanViewModel(app: Application) : AndroidViewModel(app) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun PlanScreen(vm: PlanViewModel = viewModel()) {
     val zustand = vm.zustand
-    val woche = vm.woche
+    val context = LocalContext.current
+    val team by TeamStore.get(context).zustand.collectAsState()
+    val laden by LadenStore.get(context).zustand.collectAsState()
 
     Column(
         Modifier
@@ -216,12 +241,16 @@ internal fun PlanScreen(vm: PlanViewModel = viewModel()) {
             color = Schrift,
             modifier = Modifier.padding(horizontal = 8.dp),
         )
-        val team by TeamStore.get(LocalContext.current).zustand.collectAsState()
         Text(
-            if (team.team.isEmpty()) {
-                "Noch kein Team angelegt: Der Plan nutzt ein erfundenes Beispiel-Team. Laden und Schichten sind noch Beispielwerte."
-            } else {
-                "Plan mit deinem Team (${team.team.size} Personen). Laden und Schichten sind noch Beispielwerte."
+            buildString {
+                append(
+                    if (team.team.isEmpty()) "Noch kein Team angelegt: Der Plan nutzt ein erfundenes Beispiel-Team. "
+                    else "Plan mit deinem Team (${team.team.size} Personen). ",
+                )
+                append(
+                    if (laden.eingerichtet) "Laden und Schichten wie unter „Laden“ eingestellt."
+                    else "Laden und Schichten sind noch Beispielwerte (unter „Laden“ prüfen).",
+                )
             },
             fontSize = 14.sp,
             color = TextLeise,
@@ -229,6 +258,12 @@ internal fun PlanScreen(vm: PlanViewModel = viewModel()) {
         )
 
         UpdateBanner()
+
+        laden.meldung?.let { Hinweis("Laden: $it", Modifier.padding(horizontal = 8.dp)) }
+        if (Shop.problems(laden.laden).isNotEmpty()) {
+            Hinweis("Die Laden-Einstellungen haben Fehler. Bitte unter „Laden“ korrigieren.", Modifier.padding(horizontal = 8.dp))
+        }
+        Shop.warnings(laden.laden).forEach { Hinweis(it, Modifier.padding(horizontal = 8.dp)) }
 
         Button(
             onClick = vm::erstellen,
@@ -240,7 +275,7 @@ internal fun PlanScreen(vm: PlanViewModel = viewModel()) {
                 .padding(horizontal = 8.dp)
                 .height(52.dp),
         ) {
-            Text("Plan erstellen", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            Text("Plan erstellen (${laden.laden.planWeeks} Wochen)", fontSize = 17.sp, fontWeight = FontWeight.Bold)
         }
 
         when (val z = zustand) {
@@ -253,15 +288,35 @@ internal fun PlanScreen(vm: PlanViewModel = viewModel()) {
                 CircularProgressIndicator(Modifier.size(24.dp), color = Akzent)
                 Text("Plan wird berechnet …", color = Schrift)
             }
-            is Zustand.Fehler -> Hinweis("Fehler im Planer: ${z.meldung}")
+            is Zustand.Fehler -> Hinweis("Fehler im Planer: ${z.meldung}", Modifier.padding(horizontal = 8.dp))
             is Zustand.Fertig -> {
-                val ersterTag = z.request.firstDay.plusWeeks(woche.toLong())
-                WochenKopf(
-                    ersterTag = ersterTag,
-                    zurueck = { if (woche > 0) vm.woche-- },
-                    weiter = { if (woche < z.request.days / 7 - 1) vm.woche++ },
-                )
-                WochenRaster(z.request, z.plan, ersterTag)
+                val wochen = (z.request.days + 6) / 7
+                // Jeder neue Plan beginnt mit eigenem Blätter-Zustand; die Woche übersteht Drehen über das ViewModel.
+                key(z) {
+                    val pager = rememberPagerState(initialPage = vm.woche.coerceIn(0, wochen - 1)) { wochen }
+                    val scope = rememberCoroutineScope()
+                    LaunchedEffect(pager) {
+                        snapshotFlow { pager.currentPage }.collect { vm.woche = it }
+                    }
+                    WochenKopf(
+                        ersterTag = z.request.firstDay.plusWeeks(pager.currentPage.toLong()),
+                        woche = pager.currentPage,
+                        wochen = wochen,
+                        zurueck = { scope.launch { pager.animateScrollToPage(pager.currentPage - 1) } },
+                        weiter = { scope.launch { pager.animateScrollToPage(pager.currentPage + 1) } },
+                    )
+                    // Nach links und rechts wischen wechselt die Woche.
+                    HorizontalPager(
+                        state = pager,
+                        verticalAlignment = Alignment.Top,
+                        pageSpacing = 16.dp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("wochen-pager"),
+                    ) { seite ->
+                        WochenRaster(z.request, z.plan, z.request.firstDay.plusWeeks(seite.toLong()))
+                    }
+                }
                 Zusammenfassung(z)
             }
         }
@@ -272,7 +327,7 @@ internal fun PlanScreen(vm: PlanViewModel = viewModel()) {
 }
 
 @Composable
-private fun WochenKopf(ersterTag: LocalDate, zurueck: () -> Unit, weiter: () -> Unit) {
+private fun WochenKopf(ersterTag: LocalDate, woche: Int, wochen: Int, zurueck: () -> Unit, weiter: () -> Unit) {
     val f = DateTimeFormatter.ofPattern("dd.MM.")
     Row(
         Modifier
@@ -280,20 +335,40 @@ private fun WochenKopf(ersterTag: LocalDate, zurueck: () -> Unit, weiter: () -> 
             .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        OutlinedButton(onClick = zurueck, modifier = Modifier.size(48.dp), contentPadding = ButtonDefaults.TextButtonContentPadding) {
-            Text("‹", fontSize = 22.sp, color = Schrift)
+        OutlinedButton(
+            onClick = zurueck,
+            enabled = woche > 0,
+            modifier = Modifier
+                .size(48.dp)
+                .semantics { contentDescription = "Vorige Woche" },
+            contentPadding = ButtonDefaults.TextButtonContentPadding,
+        ) {
+            Text("‹", fontSize = 22.sp, color = if (woche > 0) Schrift else Rand)
         }
         Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("KW ${ersterTag.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)}", fontSize = 13.sp, color = TextLeise)
+            Text(
+                "KW ${ersterTag.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)} · Woche ${woche + 1} von $wochen",
+                fontSize = 13.sp,
+                color = TextLeise,
+            )
             Text(
                 "${ersterTag.format(f)} – ${ersterTag.plusDays(6).format(f)}",
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
                 color = Schrift,
+                modifier = Modifier.testTag("wochen-titel"),
             )
+            Text("wischen zum Blättern", fontSize = 11.sp, color = TextLeise)
         }
-        OutlinedButton(onClick = weiter, modifier = Modifier.size(48.dp), contentPadding = ButtonDefaults.TextButtonContentPadding) {
-            Text("›", fontSize = 22.sp, color = Schrift)
+        OutlinedButton(
+            onClick = weiter,
+            enabled = woche < wochen - 1,
+            modifier = Modifier
+                .size(48.dp)
+                .semantics { contentDescription = "Nächste Woche" },
+            contentPadding = ButtonDefaults.TextButtonContentPadding,
+        ) {
+            Text("›", fontSize = 22.sp, color = if (woche < wochen - 1) Schrift else Rand)
         }
     }
 }
@@ -366,31 +441,17 @@ private fun Zelle(shift: Shift?, modifier: Modifier) {
 @Composable
 private fun Zusammenfassung(z: Zustand.Fertig) {
     if (!z.plan.solved) {
-        Hinweis("In der Rechenzeit wurde kein Plan gefunden. Bitte erneut versuchen.")
+        Hinweis("In der Rechenzeit wurde kein Plan gefunden. Bitte erneut versuchen.", Modifier.padding(horizontal = 8.dp))
         return
     }
     val text = buildString {
         append("Berechnet in ${z.millis / 1000.0} s. ")
         if (z.plan.unfilled.isEmpty()) append("Alle Schichten sind besetzt.")
         else append("${z.plan.unfilled.size} Schichten sind unbesetzt.")
-        append("\n\nStunden in 2 Wochen:\n")
+        append("\n\nStunden in ${(z.request.days + 6) / 7} Wochen:\n")
         z.request.employees.forEach { e ->
             append("${e.name}: ${"%.1f".format(z.plan.paidMinutesOf(e.id) / 60.0)} h\n")
         }
     }
-    Hinweis(text.trimEnd())
-}
-
-@Composable
-private fun Hinweis(text: String) {
-    Text(
-        text,
-        fontSize = 14.sp,
-        color = Schrift,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp)
-            .background(Warnung, RoundedCornerShape(10.dp))
-            .padding(12.dp),
-    )
+    Hinweis(text.trimEnd(), Modifier.padding(horizontal = 8.dp))
 }

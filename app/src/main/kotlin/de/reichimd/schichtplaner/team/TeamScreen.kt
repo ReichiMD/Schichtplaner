@@ -1,6 +1,9 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package de.reichimd.schichtplaner.team
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,6 +22,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -41,6 +45,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -59,21 +64,28 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import de.reichimd.schichtplaner.core.Employee
+import de.reichimd.schichtplaner.core.Problem
+import de.reichimd.schichtplaner.core.team.TeamField
+import de.reichimd.schichtplaner.ui.Abschnitt
+import de.reichimd.schichtplaner.ui.Akzent
+import de.reichimd.schichtplaner.ui.AkzentDunkel
+import de.reichimd.schichtplaner.ui.Auswahl
+import de.reichimd.schichtplaner.ui.Chip
+import de.reichimd.schichtplaner.ui.Frueh
+import de.reichimd.schichtplaner.ui.Hinweis
+import de.reichimd.schichtplaner.ui.NichtGespeichert
+import de.reichimd.schichtplaner.ui.Rand
+import de.reichimd.schichtplaner.ui.RandHell
+import de.reichimd.schichtplaner.ui.Schalter
+import de.reichimd.schichtplaner.ui.Schrift
+import de.reichimd.schichtplaner.ui.Spaet
+import de.reichimd.schichtplaner.ui.Stepper
+import de.reichimd.schichtplaner.ui.TextLeise
+import de.reichimd.schichtplaner.ui.TextMittel
 import de.reichimd.schichtplaner.core.team.Team
+import kotlinx.coroutines.launch
 import java.time.DayOfWeek
 import java.util.UUID
-
-private val Schrift = Color(0xFF2B2620)
-private val TextMittel = Color(0xFF4A4239)
-private val TextLeise = Color(0xFF6B6258)
-private val Akzent = Color(0xFF8A3A12)
-private val AkzentDunkel = Color(0xFF6B2C0D)
-private val Frueh = Color(0xFFF6D9B8)
-private val Spaet = Color(0xFFCFE0F3)
-private val Rand = Color(0xFFDDD3C4)
-private val RandHell = Color(0xFFE5DCCD)
-private val Chip = Color(0xFFF1ECE4)
-private val Warnung = Color(0xFFFFF4E5)
 
 /** Markiert "neuer Mitarbeiter" im Zustand des Bearbeiten-Screens. */
 private const val NEU = "__neu__"
@@ -104,6 +116,7 @@ internal fun TeamBereich(
         }
         MitarbeiterBearbeiten(
             original = vorhanden,
+            team = zustand.team,
             store = store,
             schliessen = { offen = null },
         )
@@ -255,12 +268,21 @@ private fun MitarbeiterZeile(e: Employee, enabled: Boolean, onClick: () -> Unit)
     }
 }
 
+/** So heißen die Abschnitte im Formular; damit nennt der Kasten über "Speichern", wo es hakt. */
+private val FELDNAME = mapOf(
+    TeamField.NAME to "Vorname",
+    TeamField.HOURS to "Stunden im Monat",
+    TeamField.SHIFTS to "Welche Schichten?",
+    TeamField.DAYS to "Kann an diesen Tagen nie",
+)
+
 /** Wochentage als Zeichenkette "135" (Mo, Mi, Fr), damit sie Drehen und Neustart überstehen. */
 private fun tageAlsText(tage: Set<DayOfWeek>) = tage.sorted().joinToString("") { it.value.toString() }
 private fun tageAusText(text: String) = text.mapNotNull { it.digitToIntOrNull() }.filter { it in 1..7 }.map(DayOfWeek::of).toSet()
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MitarbeiterBearbeiten(original: Employee?, store: TeamStore, schliessen: () -> Unit) {
+private fun MitarbeiterBearbeiten(original: Employee?, team: List<Employee>, store: TeamStore, schliessen: () -> Unit) {
     var name by rememberSaveable { mutableStateOf(original?.name ?: "") }
     var stunden by rememberSaveable { mutableStateOf(original?.monthlyHours ?: 80) }
     var frueh by rememberSaveable { mutableStateOf(original?.canEarly ?: true) }
@@ -268,9 +290,13 @@ private fun MitarbeiterBearbeiten(original: Employee?, store: TeamStore, schlies
     var gesperrt by rememberSaveable { mutableStateOf(tageAlsText(original?.blockedWeekdays ?: emptySet())) }
     var aushilfe by rememberSaveable { mutableStateOf(original?.isBackup ?: false) }
     val neueId = rememberSaveable { UUID.randomUUID().toString() }
-    var probleme by remember { mutableStateOf(emptyList<String>()) }
+    // Nach dem ersten Speichern-Versuch wird laufend geprüft: Rote Hinweise verschwinden, sobald es passt.
+    var versucht by rememberSaveable { mutableStateOf(false) }
+    var allgemein by remember { mutableStateOf(emptyList<Problem<TeamField>>()) }
     var verwerfenFrage by remember { mutableStateOf(false) }
     var loeschenFrage by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val requester = remember { TeamField.entries.associateWith { BringIntoViewRequester() } }
 
     fun entwurf() = Employee(
         id = original?.id ?: neueId,
@@ -282,6 +308,9 @@ private fun MitarbeiterBearbeiten(original: Employee?, store: TeamStore, schlies
         isBackup = aushilfe,
     )
 
+    val probleme = if (versucht) Team.problems(entwurf(), team) + allgemein else emptyList()
+    fun fehler(feld: TeamField) = probleme.filter { it.field == feld }.map { it.message }
+
     // Ausgangsstand fest aus dem Original (bzw. den Startwerten), damit es auch nach dem Drehen stimmt.
     val start = original?.copy(name = Team.cleanName(original.name)) ?: Employee(neueId, "", 80)
     val geaendert = entwurf() != start
@@ -290,6 +319,19 @@ private fun MitarbeiterBearbeiten(original: Employee?, store: TeamStore, schlies
         if (geaendert) verwerfenFrage = true else schliessen()
     }
     BackHandler { zurueck() }
+
+    fun speichern() {
+        val ergebnis = store.speichern(entwurf())
+        if (ergebnis.isEmpty()) {
+            schliessen()
+            return
+        }
+        versucht = true
+        allgemein = ergebnis.filter { it.field == TeamField.GENERAL }
+        // Zum ersten Fehler scrollen, damit er sicher zu sehen ist.
+        val erstes = TeamField.entries.firstOrNull { f -> ergebnis.any { it.field == f } }
+        if (erstes != null) scope.launch { requester.getValue(erstes).bringIntoView() }
+    }
 
     Column(
         Modifier.fillMaxSize(),
@@ -320,11 +362,12 @@ private fun MitarbeiterBearbeiten(original: Employee?, store: TeamStore, schlies
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
-            Abschnitt("Vorname") {
+            Abschnitt("Vorname", fehler = fehler(TeamField.NAME), requester = requester[TeamField.NAME], tag = "vorname") {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { if (it.length <= Team.MAX_NAME_LENGTH) name = it },
                     singleLine = true,
+                    isError = fehler(TeamField.NAME).isNotEmpty(),
                     textStyle = androidx.compose.ui.text.TextStyle(fontSize = 18.sp, color = Schrift),
                     keyboardOptions = KeyboardOptions(
                         capitalization = KeyboardCapitalization.Words,
@@ -336,6 +379,7 @@ private fun MitarbeiterBearbeiten(original: Employee?, store: TeamStore, schlies
                         unfocusedBorderColor = Rand,
                         focusedContainerColor = Color.White,
                         unfocusedContainerColor = Color.White,
+                        errorContainerColor = Color.White,
                         cursorColor = Akzent,
                     ),
                     modifier = Modifier
@@ -344,25 +388,16 @@ private fun MitarbeiterBearbeiten(original: Employee?, store: TeamStore, schlies
                 )
             }
 
-            Abschnitt("Stunden im Monat") {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    RundKnopf("−", "${Team.HOURS_STEP} Stunden weniger") {
-                        stunden = Team.clampHours(stunden - Team.HOURS_STEP)
-                    }
-                    Text(
-                        "$stunden h",
-                        fontSize = 32.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Schrift,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("stunden"),
-                    )
-                    RundKnopf("+", "${Team.HOURS_STEP} Stunden mehr") {
-                        stunden = Team.clampHours(stunden + Team.HOURS_STEP)
-                    }
-                }
+            Abschnitt("Stunden im Monat", fehler = fehler(TeamField.HOURS), requester = requester[TeamField.HOURS]) {
+                Stepper(
+                    wert = "$stunden h",
+                    weniger = "${Team.HOURS_STEP} Stunden weniger",
+                    mehr = "${Team.HOURS_STEP} Stunden mehr",
+                    tag = "stunden",
+                    groesse = 32,
+                    onWeniger = { stunden = Team.clampHours(stunden - Team.HOURS_STEP) },
+                    onMehr = { stunden = Team.clampHours(stunden + Team.HOURS_STEP) },
+                )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Team.HOURS_PRESETS.forEach { h ->
                         Auswahl(h.toString(), gewaehlt = stunden == h, modifier = Modifier.weight(1f)) { stunden = h }
@@ -370,12 +405,23 @@ private fun MitarbeiterBearbeiten(original: Employee?, store: TeamStore, schlies
                 }
             }
 
-            Abschnitt("Welche Schichten?") {
+            Abschnitt(
+                "Welche Schichten?",
+                "Antippen schaltet um. „Ja“ heißt: kann diese Schicht.",
+                fehler = fehler(TeamField.SHIFTS),
+                requester = requester[TeamField.SHIFTS],
+                tag = "schichten",
+            ) {
                 Schalter("Frühschicht", frueh, Frueh) { frueh = !frueh }
                 Schalter("Spätschicht", spaet, Spaet) { spaet = !spaet }
             }
 
-            Abschnitt("Kann an diesen Tagen nie", "Zum Beispiel wegen Schule. Antippen zum Markieren.") {
+            Abschnitt(
+                "Kann an diesen Tagen nie",
+                "Zum Beispiel wegen Schule. Antippen zum Markieren.",
+                fehler = fehler(TeamField.DAYS),
+                requester = requester[TeamField.DAYS],
+            ) {
                 val tage = tageAusText(gesperrt)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     DayOfWeek.entries.forEach { d ->
@@ -412,13 +458,13 @@ private fun MitarbeiterBearbeiten(original: Employee?, store: TeamStore, schlies
         ) {
             // Direkt über dem Knopf, damit der Hinweis nie außerhalb des Bildes landet.
             if (probleme.isNotEmpty()) {
-                Hinweis(probleme.joinToString("\n"))
+                NichtGespeichert(
+                    wo = TeamField.entries.filter { f -> probleme.any { it.field == f } }.mapNotNull { FELDNAME[it] },
+                    weitere = probleme.filter { it.field == TeamField.GENERAL }.map { it.message },
+                )
             }
             Button(
-                onClick = {
-                    probleme = store.speichern(entwurf())
-                    if (probleme.isEmpty()) schliessen()
-                },
+                onClick = ::speichern,
                 colors = ButtonDefaults.buttonColors(containerColor = Akzent),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
@@ -456,85 +502,5 @@ private fun MitarbeiterBearbeiten(original: Employee?, store: TeamStore, schlies
             },
             dismissButton = { TextButton(onClick = { loeschenFrage = false }) { Text("Abbrechen", color = Schrift) } },
         )
-    }
-}
-
-@Composable
-private fun Abschnitt(titel: String, unterzeile: String? = null, inhalt: @Composable () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(titel, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextMittel)
-        if (unterzeile != null) Text(unterzeile, fontSize = 13.sp, color = TextLeise)
-        inhalt()
-    }
-}
-
-@Composable
-private fun RundKnopf(text: String, beschreibung: String, onClick: () -> Unit) {
-    OutlinedButton(
-        onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
-        contentPadding = PaddingValues(0.dp),
-        modifier = Modifier
-            .size(52.dp)
-            .semantics { contentDescription = beschreibung },
-    ) { Text(text, fontSize = 24.sp, color = Schrift) }
-}
-
-@Composable
-private fun Auswahl(
-    text: String,
-    gewaehlt: Boolean,
-    modifier: Modifier = Modifier,
-    gewaehltFarbe: Color = Schrift,
-    onClick: () -> Unit,
-) {
-    val form = RoundedCornerShape(12.dp)
-    Box(
-        modifier
-            .heightIn(min = 48.dp)
-            .background(if (gewaehlt) gewaehltFarbe else Color.White, form)
-            .border(1.dp, if (gewaehlt) gewaehltFarbe else Rand, form)
-            .clickable(role = Role.Checkbox, onClick = onClick)
-            .semantics { selected = gewaehlt },
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text,
-            fontSize = 15.sp,
-            fontWeight = if (gewaehlt) FontWeight.Bold else FontWeight.Normal,
-            color = if (gewaehlt) Color.White else Schrift,
-        )
-    }
-}
-
-@Composable
-private fun Schalter(text: String, an: Boolean, farbeAn: Color, onClick: () -> Unit) {
-    val form = RoundedCornerShape(12.dp)
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .heightIn(min = 52.dp)
-            .background(if (an) farbeAn else Color.White, form)
-            .border(if (an) 2.dp else 1.dp, if (an) Akzent else Rand, form)
-            .clickable(role = Role.Switch, onClick = onClick)
-            .semantics { selected = an }
-            .padding(horizontal = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(text, fontSize = 16.sp, color = Schrift, modifier = Modifier.weight(1f))
-        Text(if (an) "Ja" else "Nein", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Schrift)
-    }
-}
-
-@Composable
-private fun Hinweis(text: String, modifier: Modifier = Modifier, aktion: (@Composable () -> Unit)? = null) {
-    Column(
-        modifier
-            .fillMaxWidth()
-            .background(Warnung, RoundedCornerShape(10.dp))
-            .padding(12.dp),
-    ) {
-        Text(text, fontSize = 14.sp, color = Schrift)
-        aktion?.invoke()
     }
 }

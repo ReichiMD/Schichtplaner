@@ -86,6 +86,31 @@ class TeamScreenOnDeviceTest {
         compose.onNodeWithTag("neu").performClick()
         compose.onNodeWithTag("speichern").performClick()
         compose.onNodeWithText("Bitte einen Vornamen eingeben.").assertIsDisplayed()
+        compose.onNodeWithTag("nicht-gespeichert").assertIsDisplayed()
+    }
+
+    @Test
+    fun ohneSchichtStehtDerFehlerAmAbschnittUndVerschwindetBeimKorrigieren() {
+        val store = TeamStore(dir)
+        runBlocking { withTimeout(10_000) { store.warten() } }
+        compose.setContent { TeamBereich(store = store) }
+
+        compose.onNodeWithTag("neu").performClick()
+        compose.onNodeWithTag("vorname").performTextInput("Ida")
+        compose.onNodeWithText("Frühschicht").performScrollTo().performClick()
+        compose.onNodeWithText("Spätschicht").performScrollTo().performClick()
+        compose.onNodeWithTag("speichern").performClick()
+
+        // Nicht gespeichert, Fehler direkt bei "Welche Schichten?" und als Kasten über dem Knopf.
+        compose.onNodeWithTag("fehler-schichten").assertIsDisplayed()
+        compose.onNodeWithTag("nicht-gespeichert").assertIsDisplayed()
+        assertEquals(0, runBlocking { withTimeout(10_000) { store.warten() } }.team.size)
+
+        // Spätschicht wieder an: Der Fehler verschwindet sofort, Speichern klappt.
+        compose.onNodeWithText("Spätschicht").performScrollTo().performClick()
+        compose.onNodeWithTag("fehler-schichten").assertDoesNotExist()
+        compose.onNodeWithTag("speichern").performClick()
+        compose.onNodeWithTag("mitarbeiter-Ida").assertIsDisplayed()
     }
 
     @Test
