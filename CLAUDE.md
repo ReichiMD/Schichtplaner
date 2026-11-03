@@ -21,4 +21,5 @@ Fachliche Regeln: [docs/regeln.md](docs/regeln.md). Bei Widersprüchen gilt dies
 - Planung mit Constraint-Solver, offline. Kandidaten: Choco (reines Java), OR-Tools CP-SAT (nativ), Timefold. Noch nicht entschieden.
 - PDF-Export im Layout des gewohnten Papier-Wochenblatts.
 - Updates: GitHub Actions baut bei jedem Release eine signierte APK. Die App prüft beim Start die GitHub Releases API, zeigt "Update verfügbar", lädt die APK und öffnet die Installation.
-- Application-ID: noch offen (Vorschlag `de.reichimd.schichtplaner`). Darf nach dem ersten Release nicht mehr geändert werden.
+- Application-ID: `de.reichimd.schichtplaner` (festgelegt 03.11.2026). Darf nie mehr geändert werden.
+- Signierung: Release-Keystore liegt NICHT im Repo. GitHub Secrets: `SIGNING_KEYSTORE_BASE64`, `SIGNING_STORE_PASSWORD`, `SIGNING_KEY_ALIAS` (= `schichtplaner`), `SIGNING_KEY_PASSWORD`.
