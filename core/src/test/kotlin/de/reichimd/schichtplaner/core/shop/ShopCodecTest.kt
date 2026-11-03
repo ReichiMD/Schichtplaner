@@ -84,7 +84,7 @@ class ShopCodecTest {
             "templates":[
               {"id":"f1","name":"Früh 1","kind":"early","startTime":"04:30","endTime":"11:30"},
               {"id":"sp","name":"Spät","kind":"late","startTime":"12:30","endAfterClose":30,"weekdays":[1,6]},
-              {"id":"ab","name":"Abend","kind":"late","startBeforeClose":120,"endAfterClose":0,"weekdays":[1]}
+              {"id":"ab","name":"Abend","kind":"late","startBeforeClose":120,"endAfterClose":30,"weekdays":[1]}
             ]}"""
         val s = ShopCodec.decode(alt)
         val t = { h: Int, m: Int -> LocalTime.of(h, m) }
@@ -94,9 +94,26 @@ class ShopCodecTest {
         val sp = s.templates.single { it.id == "sp" }
         assertEquals(listOf("Mo 12:30–18:30", "Sa 12:30–16:30"), Shop.preview(sp, s.openingHours))
         val ab = s.templates.single { it.id == "ab" }
-        assertEquals(listOf("Mo 16:00–18:00"), Shop.preview(ab, s.openingHours))
+        assertEquals(listOf("Mo 16:00–18:30"), Shop.preview(ab, s.openingHours))
+        assertEquals(emptyList(), Shop.problems(s))
+        assertEquals(emptyList(), Shop.warnings(s).filter { "außerhalb" in it })
         // Wieder gespeichert ist es Version 2 und bleibt gleich.
         assertEquals(s, ShopCodec.decode(ShopCodec.encode(s)))
+    }
+
+    @Test
+    fun version1MitVerschiedenenNachlaeufenBleibtGueltig() {
+        // Spät +30, Abend +0: Verschieben ginge nicht für beide. Dann bleibt der Feierabend, nichts wird ungültig.
+        val alt = """{"version":1,
+            "openingHours":[{"day":1,"open":"06:00","close":"18:00"}],
+            "templates":[
+              {"id":"sp","name":"Spät","kind":"late","startTime":"12:30","endAfterClose":30,"weekdays":[1]},
+              {"id":"ab","name":"Abend","kind":"late","startTime":"14:00","endAfterClose":0,"weekdays":[1]}
+            ]}"""
+        val s = ShopCodec.decode(alt)
+        assertEquals(emptyList(), Shop.problems(s))
+        assertEquals(listOf("Mo 12:30–18:30"), Shop.preview(s.templates[0], s.openingHours))
+        assertEquals(listOf("Mo 14:00–18:00"), Shop.preview(s.templates[1], s.openingHours))
     }
 
     @Test

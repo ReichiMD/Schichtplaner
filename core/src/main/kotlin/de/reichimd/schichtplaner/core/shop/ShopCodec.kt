@@ -169,9 +169,18 @@ object ShopCodec {
             val open = if (earliest != null && earliest.isBefore(h.open)) earliest else h.open
             DayHours(open, close) to realShift
         }
-        // Nur verschieben, wenn alle Tage gleich verschoben werden konnten; sonst Zeiten unverändert lassen.
+        // Feierabend nur verschieben, wenn das für jede Schicht genau aufgeht: alle Tage gleich weit und alle
+        // relativen Enden mit demselben Nachlauf. Sonst bleibt der Feierabend wie der alte Ladenschluss
+        // (Schichten liegen dann trotzdem gleich, nur mit Nachlauf nach Arbeitsende).
         val shifts = hours.values.map { it.second }.toSet()
-        if (shifts.size > 1) return old.copy(openingHours = hours.mapValues { (d, v) -> DayHours(v.first.open, old.openingHours.getValue(d).close) })
+        val afterCloses = old.templates.mapNotNull { (it.end as? ShiftEnd.AfterClose)?.minutes }.toSet()
+        val beforeOk = old.templates.all { t ->
+            val st = t.start
+            st !is ShiftStart.BeforeClose || st.minutes + shift <= Shop.MAX_BEFORE_CLOSE_MINUTES
+        }
+        if (shifts.size > 1 || afterCloses.size > 1 || !beforeOk) {
+            return old.copy(openingHours = hours.mapValues { (d, v) -> DayHours(v.first.open, old.openingHours.getValue(d).close) })
+        }
         val delta = shifts.singleOrNull() ?: 0L
         return old.copy(
             openingHours = hours.mapValues { it.value.first },

@@ -744,8 +744,9 @@ private fun VerwerfenFrage(abbrechen: () -> Unit, verwerfen: () -> Unit) {
     )
 }
 
-/** "19 h" oder "18,5 h". */
-private fun stunden(minuten: Long): String {
-    val h = minuten / 60.0
-    return if (minuten % 60 == 0L) "${minuten / 60} h" else String.format(java.util.Locale.GERMANY, "%.1f h", h)
+/** "19 h", "18,5 h" oder "18,25 h" (Viertelstunden ohne Rundung). */
+private fun stunden(minuten: Long): String = when {
+    minuten % 60 == 0L -> "${minuten / 60} h"
+    minuten % 30 == 0L -> String.format(java.util.Locale.GERMANY, "%.1f h", minuten / 60.0)
+    else -> String.format(java.util.Locale.GERMANY, "%.2f h", minuten / 60.0)
 }
