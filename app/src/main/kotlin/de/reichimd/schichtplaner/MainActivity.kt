@@ -48,6 +48,8 @@ import de.reichimd.schichtplaner.core.Planner
 import de.reichimd.schichtplaner.core.PlanningRequest
 import de.reichimd.schichtplaner.core.Shift
 import de.reichimd.schichtplaner.core.ShiftKind
+import de.reichimd.schichtplaner.update.UpdateBanner
+import de.reichimd.schichtplaner.update.VersionZeile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -147,6 +149,8 @@ internal fun PlanScreen(vm: PlanViewModel = viewModel()) {
             modifier = Modifier.padding(horizontal = 8.dp),
         )
 
+        UpdateBanner()
+
         Button(
             onClick = vm::erstellen,
             enabled = zustand !is Zustand.Rechnet,
@@ -184,12 +188,7 @@ internal fun PlanScreen(vm: PlanViewModel = viewModel()) {
         }
 
         Spacer(Modifier.height(8.dp))
-        Text(
-            "Version ${BuildConfig.VERSION_NAME}",
-            fontSize = 12.sp,
-            color = TextLeise,
-            modifier = Modifier.padding(horizontal = 8.dp),
-        )
+        VersionZeile()
     }
 }
 

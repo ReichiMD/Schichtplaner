@@ -10,3 +10,5 @@ Android-App, die einer Filialleitung den Wochen-Schichtplan abnimmt. Alles bleib
 Tests lokal ausführen: `./gradlew :core:test` (ohne Android-SDK: `./gradlew -PohneApp :core:test`)
 
 Neue Version veröffentlichen: Actions → Release → "Run workflow" mit Versionsnummer (oder Tag `vX.Y.Z` pushen). Testversionen erscheinen als Vorabversion. Jede Version muss höher sein als alle bisherigen.
+
+Updates: Die App fragt beim Start die GitHub-Releases ab (auch Vorabversionen), lädt eine neuere APK und öffnet den Android-Installer. Debug-Builds aus den Actions sind anders signiert und suchen deshalb nicht nach Updates.
