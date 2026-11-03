@@ -7,7 +7,11 @@ import kotlinx.serialization.json.Json
 import java.time.DayOfWeek
 
 /** Die gespeicherte Teamliste ist unlesbar oder stammt aus einer neueren App-Version. */
-class TeamFileException(message: String, cause: Throwable? = null) : Exception(message, cause)
+open class TeamFileException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+/** Die Datei ist in Ordnung, aber von einer neueren App-Version geschrieben. Nicht anfassen. */
+class TeamFileTooNewException(val version: Int) :
+    TeamFileException("Teamliste stammt aus einer neueren App-Version ($version)")
 
 /**
  * Speicherformat der Teamliste auf dem Handy (JSON).
@@ -71,7 +75,7 @@ object TeamCodec {
             throw TeamFileException("Teamliste ist kein gültiges Format", e)
         }
         if (file.version > VERSION) {
-            throw TeamFileException("Teamliste stammt aus einer neueren App-Version (${file.version})")
+            throw TeamFileTooNewException(file.version)
         }
         if (file.version < 1) throw TeamFileException("Unbekannte Version ${file.version}")
 

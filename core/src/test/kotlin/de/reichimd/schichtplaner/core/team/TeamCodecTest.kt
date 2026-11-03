@@ -72,7 +72,7 @@ class TeamCodecTest {
 
     @Test
     fun neuereVersionWirdNichtStillschweigendGelesen() {
-        val e = assertFailsWith<TeamFileException> {
+        val e = assertFailsWith<TeamFileTooNewException> {
             TeamCodec.decode("""{"version":2,"employees":[]}""")
         }
         assertTrue(e.message!!.contains("neueren"))

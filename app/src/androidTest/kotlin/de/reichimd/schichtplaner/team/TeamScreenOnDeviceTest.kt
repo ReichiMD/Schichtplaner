@@ -2,9 +2,11 @@ package de.reichimd.schichtplaner.team
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -45,9 +47,9 @@ class TeamScreenOnDeviceTest {
         compose.onNodeWithText("Noch niemand im Team.").assertIsDisplayed()
         compose.onNodeWithTag("neu").performClick()
         compose.onNodeWithTag("vorname").performTextInput("Ida")
-        compose.onNodeWithText("100").performClick()
-        compose.onNodeWithText("Frühschicht").performClick()
-        compose.onNodeWithText("Mi").performClick()
+        compose.onNodeWithText("100").performScrollTo().performClick()
+        compose.onNodeWithText("Frühschicht").performScrollTo().performClick()
+        compose.onNodeWithText("Mi").performScrollTo().performClick()
         compose.onNodeWithTag("speichern").performClick()
 
         compose.onNodeWithTag("mitarbeiter-Ida").assertIsDisplayed()
@@ -63,8 +65,16 @@ class TeamScreenOnDeviceTest {
         // Wieder öffnen, Stunden mit Plus erhöhen.
         compose.onNodeWithTag("mitarbeiter-Ida").performClick()
         compose.onNodeWithText("100 h").assertIsDisplayed()
+        compose.onNodeWithContentDescription("5 Stunden mehr").performClick()
+        compose.onNodeWithText("105 h").assertIsDisplayed()
         compose.onNodeWithTag("speichern").performClick()
-        compose.onNodeWithTag("mitarbeiter-Ida").assertIsDisplayed()
+        compose.onNodeWithText("105 h / Monat").assertIsDisplayed()
+
+        // Löschen mit Nachfrage.
+        compose.onNodeWithTag("mitarbeiter-Ida").performClick()
+        compose.onNodeWithText("Ida aus dem Team löschen").performScrollTo().performClick()
+        compose.onNodeWithText("Löschen").performClick()
+        compose.onNodeWithText("Noch niemand im Team.").assertIsDisplayed()
     }
 
     @Test

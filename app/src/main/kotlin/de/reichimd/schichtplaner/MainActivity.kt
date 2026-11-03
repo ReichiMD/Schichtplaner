@@ -62,7 +62,10 @@ import de.reichimd.schichtplaner.update.UpdateBanner
 import de.reichimd.schichtplaner.update.VersionZeile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
@@ -156,6 +159,15 @@ internal sealed interface Zustand {
  */
 internal class PlanViewModel(app: Application) : AndroidViewModel(app) {
     private val teamStore = TeamStore.get(app)
+
+    init {
+        // Ändert sich das Team, passt ein fertiger Plan nicht mehr: verwerfen statt Altes zu zeigen.
+        viewModelScope.launch {
+            teamStore.zustand.map { it.team }.distinctUntilChanged().drop(1).collect {
+                if (zustand is Zustand.Fertig) zustand = Zustand.Leer
+            }
+        }
+    }
 
     var zustand by mutableStateOf<Zustand>(Zustand.Leer)
         private set

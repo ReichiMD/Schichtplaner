@@ -163,7 +163,7 @@ internal fun UpdateBanner(vm: UpdateViewModel = viewModel()) {
             knopf = "Jetzt aktualisieren" to { vm.laden(z.update) }
         }
         is UpdateZustand.Laedt -> {
-            text = "Version ${z.update.versionName} wird geladen … Bitte die App dabei offen lassen, Zurück bricht das Laden ab."
+            text = "Version ${z.update.versionName} wird geladen … Bitte die App dabei offen lassen."
             knopf = null
         }
         is UpdateZustand.Bereit -> {

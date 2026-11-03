@@ -98,8 +98,8 @@ internal fun TeamBereich(
     } else {
         val vorhanden = zustand.team.firstOrNull { it.id == id }
         if (id != NEU && vorhanden == null) {
-            // Gelöscht oder nicht mehr da: zurück zur Liste.
-            LaunchedEffect(id) { offen = null }
+            // Gelöscht oder nicht mehr da: zurück zur Liste. Während des Ladens (nach Neustart) noch warten.
+            if (!zustand.laedt) LaunchedEffect(id) { offen = null }
             return
         }
         MitarbeiterBearbeiten(
@@ -282,11 +282,9 @@ private fun MitarbeiterBearbeiten(original: Employee?, store: TeamStore, schlies
         isBackup = aushilfe,
     )
 
-    val geaendert = if (original == null) {
-        name.isNotBlank()
-    } else {
-        entwurf() != original.copy(name = Team.cleanName(original.name))
-    }
+    // Ausgangsstand fest aus dem Original (bzw. den Startwerten), damit es auch nach dem Drehen stimmt.
+    val start = original?.copy(name = Team.cleanName(original.name)) ?: Employee(neueId, "", 80)
+    val geaendert = entwurf() != start
 
     fun zurueck() {
         if (geaendert) verwerfenFrage = true else schliessen()
@@ -397,10 +395,6 @@ private fun MitarbeiterBearbeiten(original: Employee?, store: TeamStore, schlies
                 Schalter("Nur bei Bedarf einplanen", aushilfe, Chip) { aushilfe = !aushilfe }
             }
 
-            if (probleme.isNotEmpty()) {
-                Hinweis(probleme.joinToString("\n"))
-            }
-
             if (original != null) {
                 TextButton(onClick = { loeschenFrage = true }, modifier = Modifier.fillMaxWidth()) {
                     Text("${original.name} aus dem Team löschen", color = Akzent)
@@ -408,13 +402,18 @@ private fun MitarbeiterBearbeiten(original: Employee?, store: TeamStore, schlies
             }
         }
 
-        Box(
+        Column(
             Modifier
                 .fillMaxWidth()
                 .background(Color.White)
                 .border(1.dp, RandHell)
                 .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            // Direkt über dem Knopf, damit der Hinweis nie außerhalb des Bildes landet.
+            if (probleme.isNotEmpty()) {
+                Hinweis(probleme.joinToString("\n"))
+            }
             Button(
                 onClick = {
                     probleme = store.speichern(entwurf())

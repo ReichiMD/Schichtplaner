@@ -6,6 +6,7 @@ import de.reichimd.schichtplaner.core.Employee
 import de.reichimd.schichtplaner.core.team.Team
 import de.reichimd.schichtplaner.core.team.TeamCodec
 import de.reichimd.schichtplaner.core.team.TeamFileException
+import de.reichimd.schichtplaner.core.team.TeamFileTooNewException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -56,8 +57,19 @@ internal class TeamStore(dir: File) {
 
     init {
         scope.launch {
-            _zustand.value = laden()
-            for (team in zuSchreiben) schreiben(team)
+            _zustand.value = try {
+                laden()
+            } catch (e: Exception) {
+                // Unerwartet (z. B. SecurityException): nichts überschreiben, aber nicht ewig "lädt" zeigen.
+                TeamZustand(laedt = false, nurLesen = true, meldung = "Die Teamliste konnte nicht geladen werden: $e")
+            }
+            for (team in zuSchreiben) {
+                try {
+                    schreiben(team)
+                } catch (e: Exception) {
+                    _zustand.update { it.copy(meldung = "Speichern fehlgeschlagen: $e") }
+                }
+            }
         }
     }
 
@@ -109,14 +121,29 @@ internal class TeamStore(dir: File) {
         }
         return try {
             TeamZustand(team = TeamCodec.decode(text), laedt = false)
+        } catch (e: TeamFileTooNewException) {
+            TeamZustand(
+                laedt = false,
+                nurLesen = true,
+                meldung = "Die Teamliste stammt aus einer neueren Version der App. Bitte die neueste Version installieren.",
+            )
         } catch (e: TeamFileException) {
             // Nicht einfach überschreiben: Die alte Datei bleibt zur Rettung im App-Ordner liegen.
             val gesichert = beiseiteLegen()
-            TeamZustand(
-                laedt = false,
-                meldung = "Die gespeicherte Teamliste war beschädigt und wurde beiseitegelegt" +
-                    (gesichert?.let { " ($it)" } ?: "") + ". Das Team ist jetzt leer.",
-            )
+            if (gesichert == null) {
+                TeamZustand(
+                    laedt = false,
+                    nurLesen = true,
+                    meldung = "Die gespeicherte Teamliste ist beschädigt und konnte nicht gesichert werden. " +
+                        "Damit nichts verloren geht, ist das Team gesperrt.",
+                )
+            } else {
+                TeamZustand(
+                    laedt = false,
+                    meldung = "Die gespeicherte Teamliste war beschädigt und wurde beiseitegelegt ($gesichert). " +
+                        "Das Team ist jetzt leer.",
+                )
+            }
         }
     }
 

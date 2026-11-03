@@ -17,7 +17,8 @@ object Team {
 
     /**
      * Beispiel-Team zum Ausprobieren, per Knopf ladbar solange das Team leer ist.
-     * Nur Vornamen; Stunden und Regeln sind ausgedachte Beispielwerte, keine echten Angaben.
+     * Die Vornamen hat der Projektinhaber bewusst freigegeben (03.11.2026). Stunden, Schichten und
+     * Sperrtage sind ausgedachte Beispielwerte und sagen nichts über echte Personen aus.
      */
     val EXAMPLE: List<Employee> = listOf(
         Employee("bsp-1", "Conny", 120),
