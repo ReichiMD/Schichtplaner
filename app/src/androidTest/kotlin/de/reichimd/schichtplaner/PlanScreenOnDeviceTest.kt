@@ -6,6 +6,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeRight
@@ -28,10 +29,10 @@ class PlanScreenOnDeviceTest {
         compose.waitUntil(60_000) { compose.onAllNodes(hasTestTag("wochen-pager")).fetchSemanticsNodes().isNotEmpty() }
 
         compose.onNodeWithText("Woche 1 von", substring = true).assertIsDisplayed()
-        compose.onNodeWithTag("wochen-pager").performTouchInput { swipeLeft() }
+        compose.onNodeWithTag("wochen-pager").performScrollTo().performTouchInput { swipeLeft() }
         compose.waitForIdle()
         compose.onNodeWithText("Woche 2 von", substring = true).assertIsDisplayed()
-        compose.onNodeWithTag("wochen-pager").performTouchInput { swipeRight() }
+        compose.onNodeWithTag("wochen-pager").performScrollTo().performTouchInput { swipeRight() }
         compose.waitForIdle()
         compose.onNodeWithText("Woche 1 von", substring = true).assertIsDisplayed()
     }

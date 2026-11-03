@@ -81,9 +81,9 @@ object ShopCodec {
     )
 
     /**
-     * @throws DataFileException wenn der Text keine gültigen Laden-Einstellungen sind. Auch Einstellungen,
-     * die die App selbst nie speichern würde (siehe [Shop.problems]), werden abgelehnt, damit der Planer
-     * nie mit kaputten Schichten rechnet.
+     * @throws DataFileException wenn der Text kein gültiges Format hat. Regelverstöße (siehe [Shop.problems])
+     * werden NICHT abgelehnt: Wird eine Regel in einer späteren Version strenger, sollen gespeicherte
+     * Einstellungen nicht als "beschädigt" beiseitegelegt werden. Die App zeigt solche Probleme an.
      */
     fun decode(text: String): ShopSettings {
         val file = try {
@@ -127,12 +127,9 @@ object ShopCodec {
                 staff = s.staff,
             )
         }
-        val settings = ShopSettings(openingHours, templates, file.planWeeks)
-        val problems = Shop.problems(settings)
-        if (problems.isNotEmpty()) {
-            throw DataFileException("Laden-Einstellungen ungültig: ${problems.joinToString("; ") { it.message }}")
-        }
-        return settings
+        val ids = templates.map { it.id }
+        if (ids.any { it.isBlank() } || ids.size != ids.toSet().size) throw DataFileException("Schicht-Kennung fehlt oder doppelt")
+        return ShopSettings(openingHours, templates, file.planWeeks)
     }
 
     private fun day(value: Int): DayOfWeek {

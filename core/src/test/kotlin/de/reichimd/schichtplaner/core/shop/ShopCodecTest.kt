@@ -54,19 +54,26 @@ class ShopCodecTest {
             """{"version":1,"openingHours":[{"day":8,"open":"06:00","close":"18:00"}]}""",
             """{"version":1,"openingHours":[{"day":1,"open":"6 Uhr","close":"18:00"}]}""",
             """{"version":1,"openingHours":[{"day":1,"open":"24:00","close":"18:00"}]}""",
-            """{"version":1,"openingHours":[{"day":1,"open":"18:00","close":"06:00"}]}""",
             """{"version":1,"openingHours":[{"day":1,"open":"06:00","close":"18:00"},{"day":1,"open":"07:00","close":"18:00"}]}""",
             """{"version":1,"templates":[{"id":"a","name":"A","kind":"mittag","startTime":"05:00","endTime":"12:00"}]}""",
             """{"version":1,"templates":[{"id":"a","name":"A","kind":"early","endTime":"12:00"}]}""",
             """{"version":1,"templates":[{"id":"a","name":"A","kind":"early","startTime":"05:00","startBeforeClose":30,"endTime":"12:00"}]}""",
             """{"version":1,"templates":[{$tpl},{$tpl}]}""",
-            """{"version":1,"templates":[{$tpl,"staff":0}]}""",
-            """{"version":1,"planWeeks":3}""",
             """[1,2]""",
         )
         for (text in kaputt) {
             assertFailsWith<DataFileException>("sollte abgelehnt werden: $text") { ShopCodec.decode(text) }
         }
+    }
+
+    @Test
+    fun regelverstoesseWerdenGeladenUndNichtAlsBeschaedigtBehandelt() {
+        // Sonst würde eine strengere Regel in einer neuen App-Version gespeicherte Einstellungen wegwerfen.
+        val tpl = """"id":"a","name":"A","kind":"early","startTime":"05:00","endTime":"12:00""""
+        val s = ShopCodec.decode(
+            """{"version":1,"openingHours":[{"day":1,"open":"18:00","close":"06:00"}],"templates":[{$tpl,"staff":0}],"planWeeks":3}""",
+        )
+        assertEquals(3, Shop.problems(s).size)
     }
 
     @Test

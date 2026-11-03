@@ -259,6 +259,10 @@ internal fun PlanScreen(vm: PlanViewModel = viewModel()) {
 
         UpdateBanner()
 
+        laden.meldung?.let { Hinweis("Laden: $it", Modifier.padding(horizontal = 8.dp)) }
+        if (Shop.problems(laden.laden).isNotEmpty()) {
+            Hinweis("Die Laden-Einstellungen haben Fehler. Bitte unter „Laden“ korrigieren.", Modifier.padding(horizontal = 8.dp))
+        }
         Shop.warnings(laden.laden).forEach { Hinweis(it, Modifier.padding(horizontal = 8.dp)) }
 
         Button(

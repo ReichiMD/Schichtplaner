@@ -152,6 +152,11 @@ private fun LadenUebersicht(zustand: LadenZustand, store: LadenStore, oeffnen: (
                 ) { Text("So übernehmen", color = Akzent, fontWeight = FontWeight.Bold) }
             }
         }
+        // Kann nur vorkommen, wenn eine neuere Regel strenger ist als beim Speichern.
+        val probleme = Shop.problems(laden)
+        if (probleme.isNotEmpty()) {
+            Hinweis("Bitte korrigieren, sonst klappt der Plan nicht:\n" + probleme.joinToString("\n") { "• " + fremdText(it, laden) })
+        }
         Shop.warnings(laden).forEach { Hinweis(it) }
 
         // Öffnungszeiten
@@ -427,7 +432,14 @@ private fun SchichtBearbeiten(original: ShiftTemplate?, laden: ShopSettings, sto
         staff = personen,
     )
 
-    val anfang = remember { original?.copy(name = Shop.cleanName(original.name)) ?: entwurf() }
+    // Fester Ausgangsstand (nicht aus den Eingaben), damit "geändert?" auch nach dem Drehen stimmt.
+    val anfang = original?.copy(name = Shop.cleanName(original.name)) ?: ShiftTemplate(
+        id = id,
+        name = "",
+        kind = ShiftKind.EARLY,
+        start = ShiftStart.At(LocalTime.of(6, 0)),
+        end = ShiftEnd.At(LocalTime.of(12, 0)),
+    )
     val geaendert = entwurf() != anfang
     val kandidat = Shop.upsert(laden, entwurf())
     val probleme = if (versucht) Shop.problems(kandidat) else emptyList()
