@@ -4,6 +4,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 // Läuft auf jedem Rechner mit Java und wird später von der App eingebunden.
 plugins {
     kotlin("jvm")
+    kotlin("plugin.serialization")
 }
 
 java {
@@ -20,6 +21,8 @@ kotlin {
 dependencies {
     // Choco 4.10.x ist Java-8-Bytecode und läuft damit problemlos auf Android.
     implementation("org.choco-solver:choco-solver:4.10.18")
+    // Speicherformat der Teamliste (JSON). Reines Kotlin, läuft auf Android und im Test.
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.3")

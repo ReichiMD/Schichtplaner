@@ -1,6 +1,8 @@
 package de.reichimd.schichtplaner
 
+import android.app.Application
 import android.os.Bundle
+import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -27,8 +29,12 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -36,11 +42,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import de.reichimd.schichtplaner.core.Plan
@@ -48,10 +56,13 @@ import de.reichimd.schichtplaner.core.Planner
 import de.reichimd.schichtplaner.core.PlanningRequest
 import de.reichimd.schichtplaner.core.Shift
 import de.reichimd.schichtplaner.core.ShiftKind
+import de.reichimd.schichtplaner.team.TeamBereich
+import de.reichimd.schichtplaner.team.TeamStore
 import de.reichimd.schichtplaner.update.UpdateBanner
 import de.reichimd.schichtplaner.update.VersionZeile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
@@ -78,7 +89,54 @@ class MainActivity : ComponentActivity() {
                         .background(Hintergrund)
                         .safeDrawingPadding(),
                 ) {
-                    PlanScreen()
+                    Hauptbereich()
+                }
+            }
+        }
+    }
+}
+
+private enum class Bereich(val titel: String) { PLAN("Plan"), TEAM("Team") }
+
+/** Untere Leiste mit Plan und Team. Beim Bearbeiten einer Person wird sie ausgeblendet. */
+@Composable
+private fun Hauptbereich() {
+    var bereich by rememberSaveable { mutableStateOf(Bereich.PLAN) }
+    var bearbeitet by remember { mutableStateOf(false) }
+
+    // Zurück im Team-Bereich führt erst zum Plan, statt die App zu schließen.
+    BackHandler(enabled = bereich != Bereich.PLAN && !bearbeitet) { bereich = Bereich.PLAN }
+
+    Column(Modifier.fillMaxSize()) {
+        Box(Modifier.weight(1f)) {
+            when (bereich) {
+                Bereich.PLAN -> PlanScreen()
+                Bereich.TEAM -> TeamBereich(bearbeitetGerade = { bearbeitet = it })
+            }
+        }
+        if (!(bereich == Bereich.TEAM && bearbeitet)) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(Color.White)
+                    .border(1.dp, Rand),
+            ) {
+                Bereich.entries.forEach { b ->
+                    val aktiv = b == bereich
+                    TextButton(
+                        onClick = { bereich = b },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(56.dp)
+                            .testTag("tab-${b.titel}"),
+                    ) {
+                        Text(
+                            b.titel,
+                            fontSize = 15.sp,
+                            fontWeight = if (aktiv) FontWeight.Bold else FontWeight.Normal,
+                            color = if (aktiv) Akzent else TextLeise,
+                        )
+                    }
                 }
             }
         }
@@ -96,7 +154,9 @@ internal sealed interface Zustand {
  * Hält den Zustand über Drehen des Handys hinweg. Die Berechnung läuft im ViewModel weiter
  * und wird nicht bei jedem Drehen neu gestartet.
  */
-internal class PlanViewModel : ViewModel() {
+internal class PlanViewModel(app: Application) : AndroidViewModel(app) {
+    private val teamStore = TeamStore.get(app)
+
     var zustand by mutableStateOf<Zustand>(Zustand.Leer)
         private set
     var woche by mutableIntStateOf(0)
@@ -106,10 +166,12 @@ internal class PlanViewModel : ViewModel() {
         zustand = Zustand.Rechnet
         woche = 0
         viewModelScope.launch {
+            // Mit dem gespeicherten Team, solange noch keins angelegt ist mit dem erfundenen Beispiel.
+            val team = teamStore.zustand.first { !it.laedt }.team
             zustand = try {
                 // Der Planer rechnet einige Sekunden (höchstens 15 s): nie im UI-Thread.
                 withContext(Dispatchers.Default) {
-                    val request = DemoData.request()
+                    val request = if (team.isEmpty()) DemoData.request() else DemoData.request(employees = team)
                     val start = System.currentTimeMillis()
                     val plan = Planner.plan(request)
                     Zustand.Fertig(request, plan, System.currentTimeMillis() - start)
@@ -142,8 +204,13 @@ internal fun PlanScreen(vm: PlanViewModel = viewModel()) {
             color = Schrift,
             modifier = Modifier.padding(horizontal = 8.dp),
         )
+        val team by TeamStore.get(LocalContext.current).zustand.collectAsState()
         Text(
-            "Beispiel mit erfundenem Team. Hier wird geprüft, ob der Planer auf dem Handy läuft.",
+            if (team.team.isEmpty()) {
+                "Noch kein Team angelegt: Der Plan nutzt ein erfundenes Beispiel-Team. Laden und Schichten sind noch Beispielwerte."
+            } else {
+                "Plan mit deinem Team (${team.team.size} Personen). Laden und Schichten sind noch Beispielwerte."
+            },
             fontSize = 14.sp,
             color = TextLeise,
             modifier = Modifier.padding(horizontal = 8.dp),
