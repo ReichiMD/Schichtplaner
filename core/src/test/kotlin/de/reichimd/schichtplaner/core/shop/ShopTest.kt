@@ -156,8 +156,8 @@ class ShopTest {
     }
 
     @Test
-    fun oeffnungszeitAendernKannEineSchichtUngueltigMachen() {
-        // Spät beginnt fest 12:30 und endet 30 min nach Schluss: Schluss um 12 Uhr am Samstag geht nicht.
+    fun arbeitszeitAendernKannEineSchichtUngueltigMachen() {
+        // Spät beginnt fest 12:30 und endet mit Arbeitsende: Feierabend um 12 Uhr am Samstag geht nicht.
         val s = beispiel.copy(openingHours = beispiel.openingHours + (SATURDAY to DayHours(t(7), t(12))))
         val p = Shop.problems(s)
         assertEquals(listOf<ShopField>(ShopField.Template("sp", TemplatePart.END)), p.map { it.field })
@@ -176,9 +176,32 @@ class ShopTest {
     @Test
     fun hinweiseBeiOffenemTagOhneSchicht() {
         val s = beispiel.copy(templates = beispiel.templates.filter { it.id == "sp" })
-        assertEquals(listOf("Am So ist offen, aber keine Schicht vorgesehen."), Shop.warnings(s))
+        assertEquals(listOf("Am So ist Arbeitszeit, aber keine Schicht vorgesehen."), Shop.warnings(s))
         assertTrue(Shop.warnings(s.copy(templates = emptyList())).single().contains("keine Schicht"))
         assertTrue(Shop.warnings(s.copy(openingHours = emptyMap())).single().contains("zu"))
+    }
+
+    @Test
+    fun schichtAusserhalbDerArbeitszeitGibtHinweis() {
+        val s = mit(neu.copy(start = ShiftStart.At(t(4)), end = ShiftEnd.At(t(9))))
+        assertEquals(emptyList(), Shop.problems(s))
+        assertEquals(listOf("„Mittag“ liegt am Mo, Di, Mi, Do, Fr, Sa, So außerhalb der Arbeitszeit."), Shop.warnings(s))
+    }
+
+    @Test
+    fun stundenProTagUndWoche() {
+        // Mo: Früh 1 7 h -> 6,5 h, Früh 2 7 h -> 6,5 h, Spät 12:30–18:30 6 h = 19 h.
+        assertEquals(19 * 60L, Shop.paidMinutesOn(beispiel, MONDAY))
+        // Sa: 6,5 + 6,5 + 4 = 17 h; So: 6,5 + 6,5 + 5,5 = 18,5 h.
+        assertEquals(17 * 60L, Shop.paidMinutesOn(beispiel, SATURDAY))
+        assertEquals(18 * 60L + 30, Shop.paidMinutesOn(beispiel, SUNDAY))
+        assertEquals(5 * 19 * 60L + 17 * 60 + 18 * 60 + 30, Shop.paidMinutesPerWeek(beispiel))
+        assertEquals(0L, Shop.paidMinutesOn(beispiel.copy(openingHours = beispiel.openingHours - MONDAY), MONDAY))
+        // Zwei Personen zählen doppelt.
+        val doppelt = Shop.upsert(beispiel, beispiel.templates.first().copy(staff = 2))
+        assertEquals(19 * 60L + 6 * 60 + 30, Shop.paidMinutesOn(doppelt, MONDAY))
+        // 4 × 121,75 h im Monat = 487 h -> 112 h pro Woche.
+        assertEquals(112 * 60L, Shop.teamMinutesPerWeek(listOf(121, 122, 122, 122)) / 60 * 60)
     }
 
     @Test
@@ -211,9 +234,9 @@ class ShopTest {
     @Test
     fun beschreibungen() {
         assertEquals("04:30", Shop.describeStart(ShiftStart.At(t(4, 30))))
-        assertEquals("30 min nach Schluss", Shop.describeEnd(ShiftEnd.AfterClose(30)))
-        assertEquals("1 h 30 min vor Schluss", Shop.describeStart(ShiftStart.BeforeClose(90)))
-        assertEquals("Ladenschluss", Shop.describeEnd(ShiftEnd.AfterClose(0)))
+        assertEquals("30 min nach Arbeitsende", Shop.describeEnd(ShiftEnd.AfterClose(30)))
+        assertEquals("1 h 30 min vor Arbeitsende", Shop.describeStart(ShiftStart.BeforeClose(90)))
+        assertEquals("Arbeitsende", Shop.describeEnd(ShiftEnd.AfterClose(0)))
     }
 
     @Test

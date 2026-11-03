@@ -14,6 +14,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -305,17 +306,7 @@ internal fun PlanScreen(vm: PlanViewModel = viewModel()) {
                         zurueck = { scope.launch { pager.animateScrollToPage(pager.currentPage - 1) } },
                         weiter = { scope.launch { pager.animateScrollToPage(pager.currentPage + 1) } },
                     )
-                    // Nach links und rechts wischen wechselt die Woche.
-                    HorizontalPager(
-                        state = pager,
-                        verticalAlignment = Alignment.Top,
-                        pageSpacing = 16.dp,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("wochen-pager"),
-                    ) { seite ->
-                        WochenRaster(z.request, z.plan, z.request.firstDay.plusWeeks(seite.toLong()))
-                    }
+                    WochenRaster(z.request, z.plan, pager)
                 }
                 Zusammenfassung(z)
             }
@@ -375,14 +366,25 @@ private fun WochenKopf(ersterTag: LocalDate, woche: Int, wochen: Int, zurueck: (
 
 private val TAGE = listOf("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")
 
-@Composable
-private fun WochenRaster(request: PlanningRequest, plan: Plan, ersterTag: LocalDate) {
-    val zuteilung: Map<Pair<String, LocalDate>, Shift> =
-        plan.assignments.associate { (it.employeeId to it.shift.date) to it.shift }
+/** Feste Zeilenhöhe, damit Namen links und Zellen im Blätterbereich genau nebeneinander liegen. */
+private val ZEILE = 46.dp
+private val NAMENSPALTE = 58.dp
+private val ABSTAND = 3.dp
 
-    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            Spacer(Modifier.width(58.dp))
+/**
+ * Wochenraster wie auf dem Papier. Namen links und die Wochentage oben bleiben stehen,
+ * nur die Schichten darunter wechseln beim Wischen nach links und rechts.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun WochenRaster(request: PlanningRequest, plan: Plan, pager: PagerState) {
+    val zuteilung: Map<Pair<String, LocalDate>, Shift> = remember(plan) {
+        plan.assignments.associate { (it.employeeId to it.shift.date) to it.shift }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(ABSTAND)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(ABSTAND)) {
+            Spacer(Modifier.width(NAMENSPALTE))
             TAGE.forEach {
                 Text(
                     it,
@@ -394,18 +396,31 @@ private fun WochenRaster(request: PlanningRequest, plan: Plan, ersterTag: LocalD
                 )
             }
         }
-        request.employees.forEach { e ->
-            Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    e.name,
-                    Modifier.width(58.dp),
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Schrift,
-                    maxLines = 1,
-                )
-                (0L until 7L).forEach { d ->
-                    Zelle(zuteilung[e.id to ersterTag.plusDays(d)], Modifier.weight(1f))
+        Row(horizontalArrangement = Arrangement.spacedBy(ABSTAND)) {
+            Column(Modifier.width(NAMENSPALTE), verticalArrangement = Arrangement.spacedBy(ABSTAND)) {
+                request.employees.forEach { e ->
+                    Box(Modifier.height(ZEILE), contentAlignment = Alignment.CenterStart) {
+                        Text(e.name, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Schrift, maxLines = 1)
+                    }
+                }
+            }
+            HorizontalPager(
+                state = pager,
+                verticalAlignment = Alignment.Top,
+                pageSpacing = 16.dp,
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("wochen-pager"),
+            ) { seite ->
+                val ersterTag = request.firstDay.plusWeeks(seite.toLong())
+                Column(verticalArrangement = Arrangement.spacedBy(ABSTAND)) {
+                    request.employees.forEach { e ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(ABSTAND)) {
+                            (0L until 7L).forEach { d ->
+                                Zelle(zuteilung[e.id to ersterTag.plusDays(d)], Modifier.weight(1f))
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -422,7 +437,7 @@ private fun Zelle(shift: Shift?, modifier: Modifier) {
     }
     Column(
         modifier
-            .heightIn(min = 44.dp)
+            .height(ZEILE)
             .background(farbe, RoundedCornerShape(6.dp))
             .border(1.dp, if (shift == null) Rand else farbe, RoundedCornerShape(6.dp))
             .padding(vertical = 3.dp),

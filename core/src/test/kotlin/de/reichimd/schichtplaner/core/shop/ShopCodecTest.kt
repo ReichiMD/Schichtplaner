@@ -71,14 +71,37 @@ class ShopCodecTest {
         // Sonst würde eine strengere Regel in einer neuen App-Version gespeicherte Einstellungen wegwerfen.
         val tpl = """"id":"a","name":"A","kind":"early","startTime":"05:00","endTime":"12:00""""
         val s = ShopCodec.decode(
-            """{"version":1,"openingHours":[{"day":1,"open":"18:00","close":"06:00"}],"templates":[{$tpl,"staff":0}],"planWeeks":3}""",
+            """{"version":2,"openingHours":[{"day":1,"open":"18:00","close":"06:00"}],"templates":[{$tpl,"staff":0}],"planWeeks":3}""",
         )
         assertEquals(3, Shop.problems(s).size)
     }
 
     @Test
+    fun version1MitOeffnungszeitenWirdAufArbeitszeitUmgerechnet() {
+        // So hat 0.1.3 das Beispiel gespeichert: Öffnung 06:00–18:00, Spät bis 30 min nach Ladenschluss.
+        val alt = """{"version":1,
+            "openingHours":[{"day":1,"open":"06:00","close":"18:00"},{"day":6,"open":"07:00","close":"16:00"}],
+            "templates":[
+              {"id":"f1","name":"Früh 1","kind":"early","startTime":"04:30","endTime":"11:30"},
+              {"id":"sp","name":"Spät","kind":"late","startTime":"12:30","endAfterClose":30,"weekdays":[1,6]},
+              {"id":"ab","name":"Abend","kind":"late","startBeforeClose":120,"endAfterClose":0,"weekdays":[1]}
+            ]}"""
+        val s = ShopCodec.decode(alt)
+        val t = { h: Int, m: Int -> LocalTime.of(h, m) }
+        assertEquals(DayHours(t(4, 30), t(18, 30)), s.openingHours[DayOfWeek.MONDAY])
+        assertEquals(DayHours(t(4, 30), t(16, 30)), s.openingHours[DayOfWeek.SATURDAY])
+        // Die Schichten liegen genau wie vorher.
+        val sp = s.templates.single { it.id == "sp" }
+        assertEquals(listOf("Mo 12:30–18:30", "Sa 12:30–16:30"), Shop.preview(sp, s.openingHours))
+        val ab = s.templates.single { it.id == "ab" }
+        assertEquals(listOf("Mo 16:00–18:00"), Shop.preview(ab, s.openingHours))
+        // Wieder gespeichert ist es Version 2 und bleibt gleich.
+        assertEquals(s, ShopCodec.decode(ShopCodec.encode(s)))
+    }
+
+    @Test
     fun neuereVersionWirdNichtGelesen() {
-        assertFailsWith<DataFileTooNewException> { ShopCodec.decode("""{"version":2}""") }
+        assertFailsWith<DataFileTooNewException> { ShopCodec.decode("""{"version":3}""") }
     }
 
     @Test

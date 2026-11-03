@@ -102,8 +102,8 @@ class LadenOnDeviceTest {
         compose.onNodeWithTag("schicht-name").performTextInput("Mittag")
         compose.onNodeWithTag("fehler-name").assertDoesNotExist()
         compose.onNodeWithText("Spät").performScrollTo().performClick()
-        // Ende "nach Ladenschluss" ab 06:00 wäre über 10 Stunden: Fehler am Ende.
-        compose.onNodeWithText("Nach Ladenschluss").performScrollTo().performClick()
+        // Ende "bis Arbeitsende" ab 06:00 (bis 18:30) wäre über 10 Stunden: Fehler am Ende.
+        compose.onNodeWithText("Bis Arbeitsende").performScrollTo().performClick()
         compose.onNodeWithTag("speichern").performClick()
         compose.onNodeWithTag("fehler-ende").assertExists()
         // Wieder feste Uhrzeit (06:00–12:00): jetzt klappt es.
@@ -125,8 +125,8 @@ class LadenOnDeviceTest {
         compose.setContent { LadenBereich(store = store) }
 
         compose.onNodeWithTag("laden-zeiten").performClick()
-        // Montag: Schluss so lange früher stellen, bis er vor der Öffnung liegt (18:00 -> 05:45).
-        repeat(49) { compose.onNodeWithContentDescription("Schluss Mo früher").performClick() }
+        // Montag: Feierabend so lange früher stellen, bis er vor dem Beginn liegt (18:30 -> 04:15).
+        repeat(57) { compose.onNodeWithContentDescription("Feierabend Mo früher").performClick() }
         compose.onNodeWithTag("speichern").performClick()
         compose.onNodeWithTag("fehler-tag-Mo").assertIsDisplayed()
         assertFalse(warte(store).eingerichtet)

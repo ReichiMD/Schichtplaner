@@ -18,7 +18,11 @@ import java.time.LocalTime
  */
 object ShopCodec {
 
-    const val VERSION = 1
+    /**
+     * 2: Die Tageszeiten sind die Arbeitszeit (erster Beginn bis Feierabend), nicht mehr die Öffnungszeit.
+     * Dateien mit Version 1 werden beim Lesen umgerechnet, die Schichtzeiten bleiben dabei gleich.
+     */
+    const val VERSION = 2
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -95,7 +99,11 @@ object ShopCodec {
         }
         if (file.version > VERSION) throw DataFileTooNewException(file.version, "Laden-Einstellungen")
         if (file.version < 1) throw DataFileException("Unbekannte Version ${file.version}")
+        val settings = readSettings(file)
+        return if (file.version == 1) fromOpeningHours(settings) else settings
+    }
 
+    private fun readSettings(file: FileV1): ShopSettings {
         val days = file.openingHours.map { it.day }
         if (days.size != days.toSet().size) throw DataFileException("Wochentag doppelt")
         val openingHours = file.openingHours.associate { d ->
@@ -142,5 +150,43 @@ object ShopCodec {
     private fun time(text: String): LocalTime {
         val m = TIME.matchEntire(text) ?: throw DataFileException("Ungültige Uhrzeit $text")
         return LocalTime.of(m.groupValues[1].toInt(), m.groupValues[2].toInt())
+    }
+
+    /**
+     * Version 1 hatte Öffnungszeiten, und die Spätschicht endete z. B. "30 min nach Ladenschluss".
+     * Umgerechnet auf Arbeitszeit: Feierabend = Ladenschluss + größter Nachlauf, Arbeitsbeginn = frühester
+     * fester Schichtbeginn. Relative Zeiten werden so verschoben, dass jede Schicht genau gleich liegt.
+     */
+    private fun fromOpeningHours(old: ShopSettings): ShopSettings {
+        val shift = old.templates.mapNotNull { (it.end as? ShiftEnd.AfterClose)?.minutes }.maxOrNull()?.coerceAtLeast(0) ?: 0L
+        val hours = old.openingHours.mapValues { (day, h) ->
+            val latest = LocalTime.of(23, 45)
+            val close = if (h.close.isAfter(latest.minusMinutes(shift))) h.close else h.close.plusMinutes(shift)
+            val realShift = java.time.Duration.between(h.close, close).toMinutes()
+            val earliest = old.templates.filter { day in it.weekdays }
+                .mapNotNull { (it.start as? ShiftStart.At)?.time }
+                .minOrNull()
+            val open = if (earliest != null && earliest.isBefore(h.open)) earliest else h.open
+            DayHours(open, close) to realShift
+        }
+        // Nur verschieben, wenn alle Tage gleich verschoben werden konnten; sonst Zeiten unverändert lassen.
+        val shifts = hours.values.map { it.second }.toSet()
+        if (shifts.size > 1) return old.copy(openingHours = hours.mapValues { (d, v) -> DayHours(v.first.open, old.openingHours.getValue(d).close) })
+        val delta = shifts.singleOrNull() ?: 0L
+        return old.copy(
+            openingHours = hours.mapValues { it.value.first },
+            templates = old.templates.map { t ->
+                t.copy(
+                    start = when (val st = t.start) {
+                        is ShiftStart.BeforeClose -> ShiftStart.BeforeClose(st.minutes + delta)
+                        is ShiftStart.At -> st
+                    },
+                    end = when (val e = t.end) {
+                        is ShiftEnd.AfterClose -> ShiftEnd.AfterClose(e.minutes - delta)
+                        is ShiftEnd.At -> e
+                    },
+                )
+            },
+        )
     }
 }

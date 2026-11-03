@@ -15,14 +15,16 @@ import java.time.LocalDate
 import java.time.LocalTime
 
 /**
- * Öffnungszeit eines Tages, so wie sie eingegeben wurde. Anders als [OpeningHours] darf sie
- * vorübergehend ungültig sein (Schluss vor Öffnung), damit die App das am Tag selbst anzeigen kann.
+ * Arbeitszeit eines Tages im Laden: vom ersten Schichtbeginn bis zum letzten Schichtende
+ * (nicht die Öffnungszeit für Kunden). Anders als [OpeningHours] darf sie vorübergehend ungültig sein
+ * (Ende vor Beginn), damit die App das am Tag selbst anzeigen kann.
  */
 data class DayHours(val open: LocalTime, val close: LocalTime)
 
 /**
- * Alles, was die Filialleitung zum Laden einstellt. Fehlt ein Wochentag in [openingHours], ist dann zu.
- * Feiertage: vorerst wie Sonntag (Öffnungszeit und Schichten), bis die echten Zeiten geklärt sind.
+ * Alles, was die Filialleitung zum Laden einstellt. Fehlt ein Wochentag in [openingHours], wird dann nicht
+ * gearbeitet. [openingHours] ist die Arbeitszeit je Tag (Name aus dem Speicherformat).
+ * Feiertage: vorerst wie Sonntag (Arbeitszeit und Schichten), bis die echten Zeiten geklärt sind.
  */
 data class ShopSettings(
     val openingHours: Map<DayOfWeek, DayHours>,
@@ -71,22 +73,23 @@ object Shop {
 
     /**
      * Vorgabe, solange die Filialleitung noch nichts eingestellt hat. Alles davon ist in der App änderbar.
-     * Zwei Frühschichten und eine Spätschicht bis 30 min nach Ladenschluss (sonntags ab 12 Uhr).
+     * Arbeitszeit vom ersten Schichtbeginn bis Feierabend. Zwei Frühschichten und eine Spätschicht bis
+     * Arbeitsende (sonntags ab 12 Uhr).
      */
     val EXAMPLE = ShopSettings(
         openingHours = DayOfWeek.entries.associateWith {
             when (it) {
-                DayOfWeek.SATURDAY -> DayHours(t(7), t(16))
-                DayOfWeek.SUNDAY -> DayHours(t(7), t(17))
-                else -> DayHours(t(6), t(18))
+                DayOfWeek.SATURDAY -> DayHours(t(4, 30), t(16, 30))
+                DayOfWeek.SUNDAY -> DayHours(t(4, 30), t(17, 30))
+                else -> DayHours(t(4, 30), t(18, 30))
             }
         },
         templates = listOf(
             ShiftTemplate("f1", "Früh 1", ShiftKind.EARLY, ShiftStart.At(t(4, 30)), ShiftEnd.At(t(11, 30))),
             ShiftTemplate("f2", "Früh 2", ShiftKind.EARLY, ShiftStart.At(t(5, 30)), ShiftEnd.At(t(12, 30))),
-            ShiftTemplate("sp", "Spät", ShiftKind.LATE, ShiftStart.At(t(12, 30)), ShiftEnd.AfterClose(30), weekdays = MO_SA),
+            ShiftTemplate("sp", "Spät", ShiftKind.LATE, ShiftStart.At(t(12, 30)), ShiftEnd.AfterClose(0), weekdays = MO_SA),
             ShiftTemplate(
-                "sp-so", "Spät So", ShiftKind.LATE, ShiftStart.At(t(12)), ShiftEnd.AfterClose(30),
+                "sp-so", "Spät So", ShiftKind.LATE, ShiftStart.At(t(12)), ShiftEnd.AfterClose(0),
                 weekdays = setOf(DayOfWeek.SUNDAY),
             ),
         ),
@@ -116,7 +119,7 @@ object Shop {
 
         for ((day, h) in settings.openingHours.toSortedMap()) {
             if (!h.close.isAfter(h.open)) {
-                result += Problem(ShopField.Day(day), "Schluss muss nach der Öffnung liegen.")
+                result += Problem(ShopField.Day(day), "Das Ende muss nach dem Beginn liegen.")
             }
         }
 
@@ -157,13 +160,13 @@ object Shop {
 
         when (val s = template.start) {
             is ShiftStart.BeforeClose -> if (s.minutes !in 0..MAX_BEFORE_CLOSE_MINUTES) {
-                add(TemplatePart.START, "Höchstens ${MAX_BEFORE_CLOSE_MINUTES / 60} Stunden vor Ladenschluss.")
+                add(TemplatePart.START, "Höchstens ${MAX_BEFORE_CLOSE_MINUTES / 60} Stunden vor Arbeitsende.")
             }
             is ShiftStart.At -> Unit
         }
         when (val e = template.end) {
             is ShiftEnd.AfterClose -> if (e.minutes !in 0..MAX_AFTER_CLOSE_MINUTES) {
-                add(TemplatePart.END, "Höchstens ${MAX_AFTER_CLOSE_MINUTES / 60} Stunden nach Ladenschluss.")
+                add(TemplatePart.END, "Höchstens ${MAX_AFTER_CLOSE_MINUTES / 60} Stunden nach Arbeitsende.")
             }
             is ShiftEnd.At -> Unit
         }
@@ -171,7 +174,7 @@ object Shop {
             return result
         }
 
-        // Uhrzeiten an jedem Tag prüfen, an dem die Schicht gebraucht wird und der Laden offen ist.
+        // Uhrzeiten an jedem Tag prüfen, an dem die Schicht gebraucht wird und gearbeitet wird.
         val reference = LocalDate.of(2024, 1, 1) // ein Montag; nur zum Rechnen
         val startBeforeMidnight = mutableListOf<DayOfWeek>()
         val endAfterMidnight = mutableListOf<DayOfWeek>()
@@ -209,7 +212,7 @@ object Shop {
     fun warnings(settings: ShopSettings): List<String> {
         val result = mutableListOf<String>()
         if (settings.openingHours.isEmpty()) {
-            result += "Der Laden ist an allen Tagen zu. So gibt es nichts zu planen."
+            result += "An keinem Tag ist Arbeitszeit eingetragen. So gibt es nichts zu planen."
             return result
         }
         if (settings.templates.isEmpty()) {
@@ -218,15 +221,50 @@ object Shop {
         }
         val withoutShift = settings.openingHours.keys.sorted().filter { day -> settings.templates.none { day in it.weekdays } }
         if (withoutShift.isNotEmpty()) {
-            result += "Am ${withoutShift.joinToString(", ") { Weekdays.short(it) }} ist offen, aber keine Schicht vorgesehen."
+            result += "Am ${withoutShift.joinToString(", ") { Weekdays.short(it) }} ist Arbeitszeit, aber keine Schicht vorgesehen."
         }
         for (template in settings.templates) {
             if (template.weekdays.isNotEmpty() && template.weekdays.none { it in settings.openingHours }) {
-                result += "„${template.name}“ fällt nur auf Tage, an denen der Laden zu ist."
+                result += "„${template.name}“ fällt nur auf Tage ohne Arbeitszeit."
+            }
+        }
+        for (template in settings.templates) {
+            val ausserhalb = template.weekdays.sorted().filter { day ->
+                val (start, end) = timesOn(template, day, settings) ?: return@filter false
+                val h = settings.openingHours.getValue(day)
+                start.toLocalTime().isBefore(h.open) || end.toLocalTime().isAfter(h.close)
+            }
+            if (ausserhalb.isNotEmpty()) {
+                result += "„${template.name}“ liegt am ${ausserhalb.joinToString(", ") { Weekdays.short(it) }} außerhalb der Arbeitszeit."
             }
         }
         return result
     }
+
+    /** Beginn und Ende der Schicht an diesem Wochentag, oder null wenn dann nicht gearbeitet wird oder ungültig. */
+    private fun timesOn(template: ShiftTemplate, day: DayOfWeek, settings: ShopSettings): Pair<java.time.LocalDateTime, java.time.LocalDateTime>? {
+        if (day !in template.weekdays) return null
+        val h = settings.openingHours[day] ?: return null
+        if (!h.close.isAfter(h.open)) return null
+        val date = LocalDate.of(2024, 1, 1).plusDays(day.value - 1L)
+        val (start, end) = ShiftCalendar.times(template, date, OpeningHours(h.open, h.close))
+        if (start.toLocalDate() != date || end.toLocalDate() != date || !end.isAfter(start)) return null
+        return start to end
+    }
+
+    /** Bezahlte Minuten aller Schichten an einem Wochentag (nach Pausenabzug, mal Personenzahl). */
+    fun paidMinutesOn(settings: ShopSettings, day: DayOfWeek): Long =
+        settings.templates.sumOf { t ->
+            val (start, end) = timesOn(t, day, settings) ?: return@sumOf 0L
+            de.reichimd.schichtplaner.core.Shift.paidMinutes(Duration.between(start, end).toMinutes()) * t.staff
+        }
+
+    /** Bezahlte Minuten aller Schichten in einer normalen Woche (ohne Feiertage). */
+    fun paidMinutesPerWeek(settings: ShopSettings): Long = DayOfWeek.entries.sumOf { paidMinutesOn(settings, it) }
+
+    /** Monatsstunden des Teams auf eine Woche umgerechnet, wie der Planer rechnet (30,4375 Tage im Monat). */
+    fun teamMinutesPerWeek(monthlyHours: List<Int>): Long =
+        Math.round(monthlyHours.sum() * 60.0 * 7 / 30.4375)
 
     fun format(time: LocalTime): String = "%02d:%02d".format(time.hour, time.minute)
 
@@ -239,12 +277,12 @@ object Shop {
 
     fun describeStart(start: ShiftStart): String = when (start) {
         is ShiftStart.At -> format(start.time)
-        is ShiftStart.BeforeClose -> if (start.minutes == 0L) "Ladenschluss" else "${formatMinutes(start.minutes)} vor Schluss"
+        is ShiftStart.BeforeClose -> if (start.minutes == 0L) "Arbeitsende" else "${formatMinutes(start.minutes)} vor Arbeitsende"
     }
 
     fun describeEnd(end: ShiftEnd): String = when (end) {
         is ShiftEnd.At -> format(end.time)
-        is ShiftEnd.AfterClose -> if (end.minutes == 0L) "Ladenschluss" else "${formatMinutes(end.minutes)} nach Schluss"
+        is ShiftEnd.AfterClose -> if (end.minutes == 0L) "Arbeitsende" else "${formatMinutes(end.minutes)} nach Arbeitsende"
     }
 
     /**
