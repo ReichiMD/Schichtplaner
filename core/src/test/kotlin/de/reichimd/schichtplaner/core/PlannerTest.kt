@@ -139,6 +139,17 @@ class PlannerTest {
     }
 
     @Test
+    fun `Urlaub ausserhalb des Zeitraums und von Unbekannten aendert nichts`() {
+        // Der Kalender speichert alle Monate; der Planer darf nur den eigenen Zeitraum zählen.
+        val outside = (1L..20L).map { Absence("a", MONDAY_START.minusDays(it), AbsenceType.VACATION) } +
+            (0L until 14L).map { Absence("a", MONDAY_START.plusDays(14 + it), AbsenceType.VACATION) } +
+            (0L until 14L).map { Absence("geloescht", MONDAY_START.plusDays(it), AbsenceType.VACATION) }
+        val ohne = plan(request())
+        val mit = plan(request(absences = outside))
+        assertEquals(ohne.assignments, mit.assignments)
+    }
+
+    @Test
     fun `Urlaub verringert das Stunden-Soll anteilig`() {
         val days = 28
         val absences = (0L until 14L).map { Absence("a", MONDAY_START.plusDays(it), AbsenceType.VACATION) }

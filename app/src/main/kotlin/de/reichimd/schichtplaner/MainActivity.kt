@@ -19,6 +19,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -63,12 +64,14 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import de.reichimd.schichtplaner.core.AbsenceType
 import de.reichimd.schichtplaner.core.Plan
 import de.reichimd.schichtplaner.core.Planner
 import de.reichimd.schichtplaner.core.PlanningRequest
 import de.reichimd.schichtplaner.core.Shift
 import de.reichimd.schichtplaner.core.ShiftKind
 import de.reichimd.schichtplaner.core.shop.Shop
+import de.reichimd.schichtplaner.core.wishes.Wishes
 import de.reichimd.schichtplaner.laden.LadenBereich
 import de.reichimd.schichtplaner.laden.LadenStore
 import de.reichimd.schichtplaner.laden.eingerichtet
@@ -86,6 +89,9 @@ import de.reichimd.schichtplaner.ui.TextLeise
 import de.reichimd.schichtplaner.team.TeamStore
 import de.reichimd.schichtplaner.update.UpdateBanner
 import de.reichimd.schichtplaner.update.VersionZeile
+import de.reichimd.schichtplaner.wuensche.WuenscheBereich
+import de.reichimd.schichtplaner.wuensche.WuenscheStore
+import de.reichimd.schichtplaner.wuensche.eintraege
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.combine
@@ -118,21 +124,22 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Bereich(val titel: String) { PLAN("Plan"), TEAM("Team"), LADEN("Laden") }
+private enum class Bereich(val titel: String) { PLAN("Plan"), WUENSCHE("Wünsche"), TEAM("Team"), LADEN("Laden") }
 
-/** Untere Leiste mit Plan, Team und Laden. Beim Bearbeiten (Person, Schicht, Zeiten) wird sie ausgeblendet. */
+/** Untere Leiste mit Plan, Wünsche, Team und Laden. Beim Bearbeiten (Person, Schicht, Zeiten) wird sie ausgeblendet. */
 @Composable
 private fun Hauptbereich() {
     var bereich by rememberSaveable { mutableStateOf(Bereich.PLAN) }
     var bearbeitet by remember { mutableStateOf(false) }
 
-    // Zurück im Team- oder Laden-Bereich führt erst zum Plan, statt die App zu schließen.
+    // Zurück in Wünsche, Team oder Laden führt erst zum Plan, statt die App zu schließen.
     BackHandler(enabled = bereich != Bereich.PLAN && !bearbeitet) { bereich = Bereich.PLAN }
 
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.weight(1f)) {
             when (bereich) {
                 Bereich.PLAN -> PlanScreen()
+                Bereich.WUENSCHE -> WuenscheBereich()
                 Bereich.TEAM -> TeamBereich(bearbeitetGerade = { bearbeitet = it })
                 Bereich.LADEN -> LadenBereich(bearbeitetGerade = { bearbeitet = it })
             }
@@ -148,14 +155,19 @@ private fun Hauptbereich() {
                     val aktiv = b == bereich
                     TextButton(
                         onClick = { bereich = b; bearbeitet = false },
+                        contentPadding = PaddingValues(horizontal = 2.dp, vertical = 8.dp),
                         modifier = Modifier
                             .weight(1f)
-                            .height(56.dp)
+                            .heightIn(min = 56.dp)
                             .testTag("tab-${b.titel}"),
                     ) {
+                        // Vier Reiter: bei großer Schrift lieber kleiner als umgebrochen.
                         Text(
                             b.titel,
                             fontSize = 15.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Visible,
                             fontWeight = if (aktiv) FontWeight.Bold else FontWeight.Normal,
                             color = if (aktiv) Akzent else TextLeise,
                         )
@@ -180,15 +192,22 @@ internal sealed interface Zustand {
 internal class PlanViewModel(app: Application) : AndroidViewModel(app) {
     private val teamStore = TeamStore.get(app)
     private val ladenStore = LadenStore.get(app)
+    private val wuenscheStore = WuenscheStore.get(app)
 
     init {
-        // Ändert sich Team oder Laden, passt ein fertiger Plan nicht mehr: verwerfen statt Altes zu zeigen.
+        // Ändert sich Team, Laden oder Wünsche-Kalender, passt ein fertiger Plan nicht mehr: verwerfen statt Altes zu zeigen.
         viewModelScope.launch {
             combine(
                 teamStore.zustand.map { it.team },
                 ladenStore.zustand.map { it.laden },
-            ) { team, laden -> team to laden }.distinctUntilChanged().drop(1).collect {
-                if (zustand is Zustand.Fertig) zustand = Zustand.Leer
+                wuenscheStore.zustand.map { it.eintraege },
+            ) { team, laden, wuensche -> Triple(team, laden, wuensche) }.distinctUntilChanged().drop(1).collect {
+                when (zustand) {
+                    is Zustand.Fertig -> zustand = Zustand.Leer
+                    // Während des Rechnens geändert (z. B. Urlaub nachgetragen): danach gleich neu rechnen.
+                    Zustand.Rechnet -> nochmal = true
+                    else -> Unit
+                }
             }
         }
     }
@@ -197,18 +216,23 @@ internal class PlanViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var woche by mutableIntStateOf(0)
 
+    /** Eingaben haben sich während der Berechnung geändert: Ergebnis wäre veraltet. */
+    private var nochmal = false
+
     fun erstellen() {
         if (zustand is Zustand.Rechnet) return
         zustand = Zustand.Rechnet
+        nochmal = false
         woche = 0
         viewModelScope.launch {
             // Mit dem gespeicherten Team, solange noch keins angelegt ist mit dem erfundenen Beispiel.
             val team = teamStore.zustand.first { !it.laedt }.team
             val laden = ladenStore.zustand.first { !it.laedt }.laden
+            val wuensche = wuenscheStore.zustand.first { !it.laedt }.eintraege
             zustand = try {
                 // Der Planer rechnet einige Sekunden (höchstens 15 s): nie im UI-Thread.
                 withContext(Dispatchers.Default) {
-                    val request = DemoData.request(employees = team.ifEmpty { DemoData.team }, laden = laden)
+                    val request = DemoData.request(employees = team.ifEmpty { DemoData.team }, laden = laden, absences = wuensche)
                     val start = System.currentTimeMillis()
                     val plan = Planner.plan(request)
                     Zustand.Fertig(request, plan, System.currentTimeMillis() - start)
@@ -217,6 +241,10 @@ internal class PlanViewModel(app: Application) : AndroidViewModel(app) {
                 throw e
             } catch (t: Throwable) {
                 Zustand.Fehler("${t::class.java.simpleName}: ${t.message}")
+            }
+            if (nochmal) {
+                zustand = Zustand.Leer
+                erstellen()
             }
         }
     }
@@ -229,6 +257,7 @@ internal fun PlanScreen(vm: PlanViewModel = viewModel()) {
     val context = LocalContext.current
     val team by TeamStore.get(context).zustand.collectAsState()
     val laden by LadenStore.get(context).zustand.collectAsState()
+    val wuensche by WuenscheStore.get(context).zustand.collectAsState()
 
     Column(
         Modifier
@@ -254,6 +283,9 @@ internal fun PlanScreen(vm: PlanViewModel = viewModel()) {
                     if (laden.eingerichtet) "Laden und Schichten wie unter „Laden“ eingestellt."
                     else "Laden und Schichten sind noch Beispielwerte (unter „Laden“ prüfen).",
                 )
+                if (team.team.isNotEmpty() && wuensche.bearbeitbar) {
+                    append(" Urlaub und Wünsche aus dem Kalender unter „Wünsche“ werden berücksichtigt.")
+                }
             },
             fontSize = 14.sp,
             color = TextLeise,
@@ -263,6 +295,13 @@ internal fun PlanScreen(vm: PlanViewModel = viewModel()) {
         UpdateBanner()
 
         laden.meldung?.let { Hinweis("Laden: $it", Modifier.padding(horizontal = 8.dp)) }
+        if (!wuensche.laedt && wuensche.nurLesen) {
+            Hinweis(
+                "Der Wünsche-Kalender ist gerade gesperrt, der Plan rechnet ohne Urlaub und Wünsche. " +
+                    "Mehr dazu unter „Wünsche“.",
+                Modifier.padding(horizontal = 8.dp),
+            )
+        }
         if (Shop.problems(laden.laden).isNotEmpty()) {
             Hinweis("Die Laden-Einstellungen haben Fehler. Bitte unter „Laden“ korrigieren.", Modifier.padding(horizontal = 8.dp))
         }
@@ -387,6 +426,9 @@ private fun WochenRaster(request: PlanningRequest, plan: Plan, pager: PagerState
     val zuteilung: Map<Pair<String, LocalDate>, Shift> = remember(plan) {
         plan.assignments.associate { (it.employeeId to it.shift.date) to it.shift }
     }
+    val abwesend: Map<Pair<String, LocalDate>, AbsenceType> = remember(request) {
+        request.absences.associate { (it.employeeId to it.date) to it.type }
+    }
 
     // Zwei Textzeilen plus Innenabstand, in der Schriftgröße des Handys.
     val zeile = with(LocalDensity.current) { maxOf(ZEILE_MIN, (ZELLE_ZEILENHOEHE * 2).toDp() + 12.dp) }
@@ -433,7 +475,8 @@ private fun WochenRaster(request: PlanningRequest, plan: Plan, pager: PagerState
                     request.employees.forEach { e ->
                         Row(horizontalArrangement = Arrangement.spacedBy(ABSTAND)) {
                             (0L until 7L).forEach { d ->
-                                Zelle(zuteilung[e.id to ersterTag.plusDays(d)], Modifier.weight(1f).height(zeile))
+                                val tag = ersterTag.plusDays(d)
+                                Zelle(zuteilung[e.id to tag], abwesend[e.id to tag], Modifier.weight(1f).height(zeile))
                             }
                         }
                     }
@@ -444,7 +487,7 @@ private fun WochenRaster(request: PlanningRequest, plan: Plan, pager: PagerState
 }
 
 @Composable
-private fun Zelle(shift: Shift?, modifier: Modifier) {
+private fun Zelle(shift: Shift?, abwesend: AbsenceType?, modifier: Modifier) {
     val f = DateTimeFormatter.ofPattern("H:mm")
     val farbe = when (shift?.kind) {
         ShiftKind.EARLY -> Frueh
@@ -460,7 +503,14 @@ private fun Zelle(shift: Shift?, modifier: Modifier) {
         verticalArrangement = Arrangement.Center,
     ) {
         if (shift == null) {
-            Text("frei", fontSize = 10.sp, lineHeight = ZELLE_ZEILENHOEHE, color = TextLeise)
+            // Ohne Schicht: Kürzel wie auf dem Papier (U, Fr, K), sonst "frei".
+            Text(
+                abwesend?.let { Wishes.code(it) } ?: "frei",
+                fontSize = if (abwesend != null) 12.sp else 10.sp,
+                lineHeight = ZELLE_ZEILENHOEHE,
+                fontWeight = if (abwesend != null) FontWeight.Bold else FontWeight.Normal,
+                color = if (abwesend != null) Schrift else TextLeise,
+            )
         } else {
             Text(shift.start.format(f), fontSize = 10.sp, lineHeight = ZELLE_ZEILENHOEHE, fontWeight = FontWeight.Bold, color = Schrift, maxLines = 1)
             Text(shift.end.format(f), fontSize = 10.sp, lineHeight = ZELLE_ZEILENHOEHE, color = Schrift, maxLines = 1)
