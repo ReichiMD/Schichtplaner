@@ -114,7 +114,17 @@ data class Weights(
     val dayOffWishBroken: Int = 100,
     val hoursDeviationPerQuarterHour: Int = 2,
     val weekendImbalance: Int = 60,
-)
+) {
+    init {
+        val all = listOf(unfilledShift, backupShift, dayOffWishBroken, hoursDeviationPerQuarterHour, weekendImbalance)
+        require(all.all { it in 0..MAX_WEIGHT }) { "Gewichte müssen zwischen 0 und $MAX_WEIGHT liegen" }
+    }
+
+    companion object {
+        /** Begrenzung, damit die Zielfunktion nicht über den Zahlenbereich läuft. */
+        const val MAX_WEIGHT = 100_000
+    }
+}
 
 data class PlanningRules(
     val minRestHours: Long = 11,
@@ -131,8 +141,21 @@ data class PlanningRequest(
     val rules: PlanningRules = PlanningRules(),
     /** Schon gearbeitete Tage direkt vor dem Zeitraum (für "max. Tage am Stück"), je Mitarbeiter-ID. */
     val workedDaysBefore: Map<String, Int> = emptyMap(),
+    /** Ende der letzten Schicht vor dem Zeitraum (für die Ruhezeit am ersten Tag), je Mitarbeiter-ID. */
+    val lastShiftEndBefore: Map<String, LocalDateTime> = emptyMap(),
 ) {
+    init {
+        require(days in 1..MAX_DAYS) { "Planungszeitraum muss 1 bis $MAX_DAYS Tage lang sein" }
+        val ids = employees.map { it.id }
+        require(ids.size == ids.toSet().size) { "Mitarbeiter-IDs müssen eindeutig sein" }
+        require(employees.all { it.monthlyHours >= 0 }) { "Monatsstunden dürfen nicht negativ sein" }
+    }
+
     val lastDay: LocalDate get() = firstDay.plusDays(days.toLong() - 1)
+
+    companion object {
+        const val MAX_DAYS = 62
+    }
 }
 
 data class Assignment(val shift: Shift, val employeeId: String)
@@ -140,8 +163,11 @@ data class Assignment(val shift: Shift, val employeeId: String)
 data class Plan(
     val assignments: List<Assignment>,
     val unfilled: List<Shift>,
-    /** true, wenn der Solver beweisen konnte, dass es keinen besseren Plan gibt. */
-    val optimal: Boolean,
+    /**
+     * false, wenn in der Rechenzeit gar kein Plan gefunden wurde. Dann sind alle Schichten in [unfilled],
+     * das bedeutet aber NICHT Personalmangel. Die App muss das getrennt anzeigen.
+     */
+    val solved: Boolean,
 ) {
     fun shiftsOf(employeeId: String): List<Shift> =
         assignments.filter { it.employeeId == employeeId }.map { it.shift }
