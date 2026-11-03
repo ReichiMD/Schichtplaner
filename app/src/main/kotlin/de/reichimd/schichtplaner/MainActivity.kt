@@ -1,110 +1,44 @@
 package de.reichimd.schichtplaner
 
-import android.app.Application
 import android.os.Bundle
-import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.key
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.PagerState
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewModelScope
-import androidx.lifecycle.viewmodel.compose.viewModel
-import de.reichimd.schichtplaner.core.AbsenceType
-import de.reichimd.schichtplaner.core.Plan
-import de.reichimd.schichtplaner.core.Planner
-import de.reichimd.schichtplaner.core.PlanningRequest
-import de.reichimd.schichtplaner.core.Shift
-import de.reichimd.schichtplaner.core.ShiftKind
-import de.reichimd.schichtplaner.core.shop.Shop
-import de.reichimd.schichtplaner.core.wishes.Wishes
 import de.reichimd.schichtplaner.laden.LadenBereich
-import de.reichimd.schichtplaner.laden.LadenStore
-import de.reichimd.schichtplaner.laden.eingerichtet
-import de.reichimd.schichtplaner.laden.laden
+import de.reichimd.schichtplaner.plan.PlanScreen
 import de.reichimd.schichtplaner.team.TeamBereich
-import de.reichimd.schichtplaner.team.team
 import de.reichimd.schichtplaner.ui.Akzent
-import de.reichimd.schichtplaner.ui.Frueh
 import de.reichimd.schichtplaner.ui.Hintergrund
-import de.reichimd.schichtplaner.ui.Hinweis
 import de.reichimd.schichtplaner.ui.Rand
-import de.reichimd.schichtplaner.ui.Schrift
-import de.reichimd.schichtplaner.ui.Spaet
 import de.reichimd.schichtplaner.ui.TextLeise
-import de.reichimd.schichtplaner.team.TeamStore
-import de.reichimd.schichtplaner.update.UpdateBanner
-import de.reichimd.schichtplaner.update.VersionZeile
 import de.reichimd.schichtplaner.wuensche.WuenscheBereich
-import de.reichimd.schichtplaner.wuensche.WuenscheStore
-import de.reichimd.schichtplaner.wuensche.eintraege
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
-import java.time.temporal.IsoFields
-
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -176,362 +110,4 @@ private fun Hauptbereich() {
             }
         }
     }
-}
-
-internal sealed interface Zustand {
-    data object Leer : Zustand
-    data object Rechnet : Zustand
-    data class Fertig(val request: PlanningRequest, val plan: Plan, val millis: Long) : Zustand
-    data class Fehler(val meldung: String) : Zustand
-}
-
-/**
- * Hält den Zustand über Drehen des Handys hinweg. Die Berechnung läuft im ViewModel weiter
- * und wird nicht bei jedem Drehen neu gestartet.
- */
-internal class PlanViewModel(app: Application) : AndroidViewModel(app) {
-    private val teamStore = TeamStore.get(app)
-    private val ladenStore = LadenStore.get(app)
-    private val wuenscheStore = WuenscheStore.get(app)
-
-    init {
-        // Ändert sich Team, Laden oder Wünsche-Kalender, passt ein fertiger Plan nicht mehr: verwerfen statt Altes zu zeigen.
-        viewModelScope.launch {
-            combine(
-                teamStore.zustand.map { it.team },
-                ladenStore.zustand.map { it.laden },
-                wuenscheStore.zustand.map { it.eintraege },
-            ) { team, laden, wuensche -> Triple(team, laden, wuensche) }.distinctUntilChanged().drop(1).collect {
-                when (zustand) {
-                    is Zustand.Fertig -> zustand = Zustand.Leer
-                    // Während des Rechnens geändert (z. B. Urlaub nachgetragen): danach gleich neu rechnen.
-                    Zustand.Rechnet -> nochmal = true
-                    else -> Unit
-                }
-            }
-        }
-    }
-
-    var zustand by mutableStateOf<Zustand>(Zustand.Leer)
-        private set
-    var woche by mutableIntStateOf(0)
-
-    /** Eingaben haben sich während der Berechnung geändert: Ergebnis wäre veraltet. */
-    private var nochmal = false
-
-    fun erstellen() {
-        if (zustand is Zustand.Rechnet) return
-        zustand = Zustand.Rechnet
-        nochmal = false
-        woche = 0
-        viewModelScope.launch {
-            // Mit dem gespeicherten Team, solange noch keins angelegt ist mit dem erfundenen Beispiel.
-            val team = teamStore.zustand.first { !it.laedt }.team
-            val laden = ladenStore.zustand.first { !it.laedt }.laden
-            val wuensche = wuenscheStore.zustand.first { !it.laedt }.eintraege
-            zustand = try {
-                // Der Planer rechnet einige Sekunden (höchstens 15 s): nie im UI-Thread.
-                withContext(Dispatchers.Default) {
-                    val request = DemoData.request(employees = team.ifEmpty { DemoData.team }, laden = laden, absences = wuensche)
-                    val start = System.currentTimeMillis()
-                    val plan = Planner.plan(request)
-                    Zustand.Fertig(request, plan, System.currentTimeMillis() - start)
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (t: Throwable) {
-                Zustand.Fehler("${t::class.java.simpleName}: ${t.message}")
-            }
-            if (nochmal) {
-                zustand = Zustand.Leer
-                erstellen()
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-internal fun PlanScreen(vm: PlanViewModel = viewModel()) {
-    val zustand = vm.zustand
-    val context = LocalContext.current
-    val team by TeamStore.get(context).zustand.collectAsState()
-    val laden by LadenStore.get(context).zustand.collectAsState()
-    val wuensche by WuenscheStore.get(context).zustand.collectAsState()
-
-    Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 8.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text(
-            "Schichtplan (Test-Version)",
-            fontSize = 22.sp,
-            fontWeight = FontWeight.Bold,
-            color = Schrift,
-            modifier = Modifier.padding(horizontal = 8.dp),
-        )
-        Text(
-            buildString {
-                append(
-                    if (team.team.isEmpty()) "Noch kein Team angelegt: Der Plan nutzt ein erfundenes Beispiel-Team. "
-                    else "Plan mit deinem Team (${team.team.size} Personen). ",
-                )
-                append(
-                    if (laden.eingerichtet) "Laden und Schichten wie unter „Laden“ eingestellt."
-                    else "Laden und Schichten sind noch Beispielwerte (unter „Laden“ prüfen).",
-                )
-                if (team.team.isNotEmpty() && wuensche.bearbeitbar) {
-                    append(" Urlaub und Wünsche aus dem Kalender unter „Wünsche“ werden berücksichtigt.")
-                }
-            },
-            fontSize = 14.sp,
-            color = TextLeise,
-            modifier = Modifier.padding(horizontal = 8.dp),
-        )
-
-        UpdateBanner()
-
-        laden.meldung?.let { Hinweis("Laden: $it", Modifier.padding(horizontal = 8.dp)) }
-        if (!wuensche.laedt && wuensche.nurLesen) {
-            Hinweis(
-                "Der Wünsche-Kalender ist gerade gesperrt, der Plan rechnet ohne Urlaub und Wünsche. " +
-                    "Mehr dazu unter „Wünsche“.",
-                Modifier.padding(horizontal = 8.dp),
-            )
-        }
-        if (Shop.problems(laden.laden).isNotEmpty()) {
-            Hinweis("Die Laden-Einstellungen haben Fehler. Bitte unter „Laden“ korrigieren.", Modifier.padding(horizontal = 8.dp))
-        }
-        Shop.warnings(laden.laden).forEach { Hinweis(it, Modifier.padding(horizontal = 8.dp)) }
-
-        Button(
-            onClick = vm::erstellen,
-            enabled = zustand !is Zustand.Rechnet,
-            colors = ButtonDefaults.buttonColors(containerColor = Akzent),
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp)
-                .height(52.dp),
-        ) {
-            Text("Plan erstellen (${laden.laden.planWeeks} Wochen)", fontSize = 17.sp, fontWeight = FontWeight.Bold)
-        }
-
-        when (val z = zustand) {
-            Zustand.Leer -> Unit
-            Zustand.Rechnet -> Row(
-                Modifier.padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                CircularProgressIndicator(Modifier.size(24.dp), color = Akzent)
-                Text("Plan wird berechnet …", color = Schrift)
-            }
-            is Zustand.Fehler -> Hinweis("Fehler im Planer: ${z.meldung}", Modifier.padding(horizontal = 8.dp))
-            is Zustand.Fertig -> {
-                val wochen = (z.request.days + 6) / 7
-                // Jeder neue Plan beginnt mit eigenem Blätter-Zustand; die Woche übersteht Drehen über das ViewModel.
-                key(z) {
-                    val pager = rememberPagerState(initialPage = vm.woche.coerceIn(0, wochen - 1)) { wochen }
-                    val scope = rememberCoroutineScope()
-                    LaunchedEffect(pager) {
-                        snapshotFlow { pager.currentPage }.collect { vm.woche = it }
-                    }
-                    WochenKopf(
-                        ersterTag = z.request.firstDay.plusWeeks(pager.currentPage.toLong()),
-                        woche = pager.currentPage,
-                        wochen = wochen,
-                        zurueck = { scope.launch { pager.animateScrollToPage(pager.currentPage - 1) } },
-                        weiter = { scope.launch { pager.animateScrollToPage(pager.currentPage + 1) } },
-                    )
-                    WochenRaster(z.request, z.plan, pager)
-                }
-                Zusammenfassung(z)
-            }
-        }
-
-        Spacer(Modifier.height(8.dp))
-        VersionZeile()
-    }
-}
-
-@Composable
-private fun WochenKopf(ersterTag: LocalDate, woche: Int, wochen: Int, zurueck: () -> Unit, weiter: () -> Unit) {
-    val f = DateTimeFormatter.ofPattern("dd.MM.")
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        OutlinedButton(
-            onClick = zurueck,
-            enabled = woche > 0,
-            modifier = Modifier
-                .size(48.dp)
-                .semantics { contentDescription = "Vorige Woche" },
-            contentPadding = ButtonDefaults.TextButtonContentPadding,
-        ) {
-            Text("‹", fontSize = 22.sp, color = if (woche > 0) Schrift else Rand)
-        }
-        Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                "KW ${ersterTag.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)} · Woche ${woche + 1} von $wochen",
-                fontSize = 13.sp,
-                color = TextLeise,
-            )
-            Text(
-                "${ersterTag.format(f)} – ${ersterTag.plusDays(6).format(f)}",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                color = Schrift,
-                modifier = Modifier.testTag("wochen-titel"),
-            )
-            Text("wischen zum Blättern", fontSize = 11.sp, color = TextLeise)
-        }
-        OutlinedButton(
-            onClick = weiter,
-            enabled = woche < wochen - 1,
-            modifier = Modifier
-                .size(48.dp)
-                .semantics { contentDescription = "Nächste Woche" },
-            contentPadding = ButtonDefaults.TextButtonContentPadding,
-        ) {
-            Text("›", fontSize = 22.sp, color = if (woche < wochen - 1) Schrift else Rand)
-        }
-    }
-}
-
-private val TAGE = listOf("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")
-
-/**
- * Mindesthöhe einer Zeile. Die echte Höhe wächst mit der Schriftgröße des Handys (siehe [zeilenHoehe]),
- * damit Beginn und Ende immer ganz zu sehen sind und Namen und Zellen trotzdem genau nebeneinander liegen.
- */
-private val ZEILE_MIN = 46.dp
-private val ZELLE_ZEILENHOEHE = 14.sp
-private val NAMENSPALTE = 64.dp
-private val ABSTAND = 3.dp
-
-/**
- * Wochenraster wie auf dem Papier. Namen links und die Wochentage oben bleiben stehen,
- * nur die Schichten darunter wechseln beim Wischen nach links und rechts.
- */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun WochenRaster(request: PlanningRequest, plan: Plan, pager: PagerState) {
-    val zuteilung: Map<Pair<String, LocalDate>, Shift> = remember(plan) {
-        plan.assignments.associate { (it.employeeId to it.shift.date) to it.shift }
-    }
-    val abwesend: Map<Pair<String, LocalDate>, AbsenceType> = remember(request) {
-        request.absences.associate { (it.employeeId to it.date) to it.type }
-    }
-
-    // Zwei Textzeilen plus Innenabstand, in der Schriftgröße des Handys.
-    val zeile = with(LocalDensity.current) { maxOf(ZEILE_MIN, (ZELLE_ZEILENHOEHE * 2).toDp() + 12.dp) }
-
-    Column(verticalArrangement = Arrangement.spacedBy(ABSTAND)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(ABSTAND)) {
-            Spacer(Modifier.width(NAMENSPALTE))
-            TAGE.forEach {
-                Text(
-                    it,
-                    Modifier.weight(1f),
-                    textAlign = TextAlign.Center,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp,
-                    color = Schrift,
-                )
-            }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(ABSTAND)) {
-            Column(Modifier.width(NAMENSPALTE), verticalArrangement = Arrangement.spacedBy(ABSTAND)) {
-                request.employees.forEach { e ->
-                    Box(Modifier.height(zeile), contentAlignment = Alignment.CenterStart) {
-                        Text(
-                            e.name,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Schrift,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-            }
-            HorizontalPager(
-                state = pager,
-                verticalAlignment = Alignment.Top,
-                pageSpacing = 16.dp,
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("wochen-pager"),
-            ) { seite ->
-                val ersterTag = request.firstDay.plusWeeks(seite.toLong())
-                Column(verticalArrangement = Arrangement.spacedBy(ABSTAND)) {
-                    request.employees.forEach { e ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(ABSTAND)) {
-                            (0L until 7L).forEach { d ->
-                                val tag = ersterTag.plusDays(d)
-                                Zelle(zuteilung[e.id to tag], abwesend[e.id to tag], Modifier.weight(1f).height(zeile))
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun Zelle(shift: Shift?, abwesend: AbsenceType?, modifier: Modifier) {
-    val f = DateTimeFormatter.ofPattern("H:mm")
-    val farbe = when (shift?.kind) {
-        ShiftKind.EARLY -> Frueh
-        ShiftKind.LATE -> Spaet
-        null -> Color.White
-    }
-    Column(
-        modifier
-            .background(farbe, RoundedCornerShape(6.dp))
-            .border(1.dp, if (shift == null) Rand else farbe, RoundedCornerShape(6.dp))
-            .padding(vertical = 3.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        if (shift == null) {
-            // Ohne Schicht: Kürzel wie auf dem Papier (U, Fr, K), sonst "frei".
-            Text(
-                abwesend?.let { Wishes.code(it) } ?: "frei",
-                fontSize = if (abwesend != null) 12.sp else 10.sp,
-                lineHeight = ZELLE_ZEILENHOEHE,
-                fontWeight = if (abwesend != null) FontWeight.Bold else FontWeight.Normal,
-                color = if (abwesend != null) Schrift else TextLeise,
-            )
-        } else {
-            Text(shift.start.format(f), fontSize = 10.sp, lineHeight = ZELLE_ZEILENHOEHE, fontWeight = FontWeight.Bold, color = Schrift, maxLines = 1)
-            Text(shift.end.format(f), fontSize = 10.sp, lineHeight = ZELLE_ZEILENHOEHE, color = Schrift, maxLines = 1)
-        }
-    }
-}
-
-@Composable
-private fun Zusammenfassung(z: Zustand.Fertig) {
-    if (!z.plan.solved) {
-        Hinweis("In der Rechenzeit wurde kein Plan gefunden. Bitte erneut versuchen.", Modifier.padding(horizontal = 8.dp))
-        return
-    }
-    val text = buildString {
-        append("Berechnet in ${z.millis / 1000.0} s. ")
-        if (z.plan.unfilled.isEmpty()) append("Alle Schichten sind besetzt.")
-        else append("${z.plan.unfilled.size} Schichten sind unbesetzt.")
-        append("\n\nStunden in ${(z.request.days + 6) / 7} Wochen:\n")
-        z.request.employees.forEach { e ->
-            append("${e.name}: ${"%.1f".format(z.plan.paidMinutesOf(e.id) / 60.0)} h\n")
-        }
-    }
-    Hinweis(text.trimEnd(), Modifier.padding(horizontal = 8.dp))
 }

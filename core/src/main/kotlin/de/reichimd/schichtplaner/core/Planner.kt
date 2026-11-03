@@ -33,7 +33,8 @@ import kotlin.math.roundToInt
 object Planner {
 
     private const val UNIT_MINUTES = 15
-    private const val AVG_DAYS_PER_MONTH = 30.4375
+    /** Durchschnittliche Tage pro Monat, um Monatsstunden auf einen Zeitraum umzurechnen. */
+    const val AVG_DAYS_PER_MONTH = 30.4375
 
     /** Fester Startwert: gleiche Eingabe ergibt (bei gleicher Rechenzeit) möglichst den gleichen Plan. */
     private const val RANDOM_SEED = 42L

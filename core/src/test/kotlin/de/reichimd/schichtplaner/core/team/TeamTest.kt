@@ -118,4 +118,16 @@ class TeamTest {
             assertEquals(emptyList(), Team.problems(e, Team.EXAMPLE), e.name)
         }
     }
+
+    @Test
+    fun reihenfolgeAendern() {
+        val clara = Employee("3", "Clara", 100)
+        val team = listOf(anna, ben, clara)
+        assertEquals(listOf(anna, clara, ben), Team.move(team, "3", up = true))
+        assertEquals(listOf(ben, anna, clara), Team.move(team, "1", up = false))
+        // Am Rand und bei unbekannter ID passiert nichts.
+        assertEquals(team, Team.move(team, "1", up = true))
+        assertEquals(team, Team.move(team, "3", up = false))
+        assertEquals(team, Team.move(team, "x", up = true))
+    }
 }

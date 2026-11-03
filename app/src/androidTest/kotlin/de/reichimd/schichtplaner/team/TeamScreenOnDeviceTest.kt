@@ -123,4 +123,23 @@ class TeamScreenOnDeviceTest {
         compose.onNodeWithTag("beispiel").performClick()
         compose.onNodeWithTag("mitarbeiter-Conny").assertIsDisplayed()
     }
+
+    @Test
+    fun reihenfolgeMitPfeilenAendern() {
+        val store = TeamStore(dir)
+        runBlocking { withTimeout(10_000) { store.warten() } }
+        assertEquals(emptyList<Any>(), store.speichern(de.reichimd.schichtplaner.core.Employee("i", "Ida", 100)))
+        assertEquals(emptyList<Any>(), store.speichern(de.reichimd.schichtplaner.core.Employee("o", "Ole", 80)))
+        runBlocking { withTimeout(10_000) { store.warten() } }
+        compose.setContent { TeamBereich(store = store, wuensche = WuenscheStore(dir)) }
+
+        compose.onNodeWithTag("runter-Ida").performClick()
+        compose.waitForIdle()
+        assertEquals(listOf("Ole", "Ida"), runBlocking { withTimeout(10_000) { store.warten() } }.team.map { it.name })
+        // Wieder hoch, und die Reihenfolge übersteht einen Neustart.
+        compose.onNodeWithTag("hoch-Ida").performClick()
+        compose.waitForIdle()
+        runBlocking { withTimeout(10_000) { store.warten() } }
+        assertEquals(listOf("Ida", "Ole"), runBlocking { withTimeout(10_000) { TeamStore(dir).warten() } }.team.map { it.name })
+    }
 }
