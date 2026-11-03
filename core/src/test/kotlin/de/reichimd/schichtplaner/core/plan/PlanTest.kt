@@ -199,6 +199,8 @@ class PlanTest {
         assertEquals("0", PlanSheet.hours(0))
         assertEquals("0,25", PlanSheet.hours(15))
         assertEquals("-1,5", PlanSheet.hours(-90))
+        assertEquals("0,83", PlanSheet.hours(50))
+        assertEquals("0,17", PlanSheet.hours(10))
         assertEquals("4:30", PlanSheet.time(mo.atTime(4, 30)))
         assertEquals("12:05", PlanSheet.time(mo.atTime(12, 5)))
     }

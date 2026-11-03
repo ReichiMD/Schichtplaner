@@ -291,8 +291,8 @@ private fun MitarbeiterZeile(
             }
         }
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Pfeil("▲", "${e.name} nach oben", enabled && !erste, "hoch-${e.name}") { verschieben(true) }
-            Pfeil("▼", "${e.name} nach unten", enabled && !letzte, "runter-${e.name}") { verschieben(false) }
+            Pfeil("▲", "${e.name} nach oben", enabled && !erste, "hoch-${e.id}") { verschieben(true) }
+            Pfeil("▼", "${e.name} nach unten", enabled && !letzte, "runter-${e.id}") { verschieben(false) }
         }
     }
 }
@@ -301,7 +301,7 @@ private fun MitarbeiterZeile(
 private fun Pfeil(text: String, beschreibung: String, enabled: Boolean, tag: String, onClick: () -> Unit) {
     Box(
         Modifier
-            .size(width = 44.dp, height = 36.dp)
+            .size(width = 48.dp, height = 40.dp)
             .background(if (enabled) Chip else Color.Transparent, RoundedCornerShape(8.dp))
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics { contentDescription = beschreibung }

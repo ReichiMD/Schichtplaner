@@ -133,6 +133,10 @@ internal class PlanViewModel : ViewModel() {
         private set
     var woche by mutableIntStateOf(0)
 
+    /** Zählt neu erstellte Pläne, damit das Blättern auch bei gleichem Zeitraum wieder bei Woche 1 beginnt. */
+    var planNummer by mutableIntStateOf(0)
+        private set
+
     fun erstellen(teamStore: TeamStore, ladenStore: LadenStore, wuenscheStore: WuenscheStore, planStore: PlanStore) {
         if (rechnung is Rechnung.Rechnet) return
         rechnung = Rechnung.Rechnet
@@ -163,7 +167,10 @@ internal class PlanViewModel : ViewModel() {
                     }
                     if (!veraltet || ergebnis !is Rechnung.Fertig) break
                 }
-                if (ergebnis is Rechnung.Fertig) woche = 0
+                if (ergebnis is Rechnung.Fertig) {
+                    woche = 0
+                    planNummer++
+                }
                 ergebnis
             } catch (e: CancellationException) {
                 throw e
@@ -315,7 +322,7 @@ internal fun PlanScreen(
         if (plan != null) {
             Zusammenfassung(plan, teamIds, hinweise)
             // Ein neuer Zeitraum beginnt mit eigenem Blätter-Zustand; Handänderungen behalten die Woche.
-            key(plan.firstDay, plan.days) {
+            key(plan.firstDay, plan.days, vm.planNummer) {
                 val pager = rememberPagerState(initialPage = vm.woche.coerceIn(0, plan.weeks - 1)) { plan.weeks }
                 val scope = rememberCoroutineScope()
                 LaunchedEffect(pager) {
@@ -366,10 +373,11 @@ internal fun PlanScreen(
         )
     }
 
-    val offenesFeld = feld?.split('|')
-    if (plan != null && offenesFeld != null && offenesFeld.size == 2) {
-        val person = leute.firstOrNull { it.id == offenesFeld[0] }
-        val tag = runCatching { LocalDate.parse(offenesFeld[1]) }.getOrNull()
+    val offenesFeld = feld
+    if (plan != null && offenesFeld != null) {
+        // Das Datum steht hinten, die ID davor (sie darf selbst "|" enthalten).
+        val person = leute.firstOrNull { it.id == offenesFeld.substringBeforeLast('|') }
+        val tag = runCatching { LocalDate.parse(offenesFeld.substringAfterLast('|')) }.getOrNull()
         if (person == null || tag == null || !PlanSheet.inPlan(plan, tag) || !aenderbar) {
             LaunchedEffect(feld) { feld = null }
         } else {
@@ -897,11 +905,15 @@ private fun PersonTagDialog(
                     inhaber != null -> "$inhaber hat dann frei"
                     else -> "offen"
                 }
+                // Beim Tausch auch zeigen, was die andere Person auf der alten Schicht verletzen würde.
+                val tauschHinweise = if (meine || s.employeeId == null || eigene.isEmpty()) emptyList()
+                else PlanCheck.warnings(PlanEdit.assign(plan, s.key, person.id), leute, abwesend)
+                    .filter { it.employeeId == s.employeeId && it.key == eigene.first().key }
                 Wahl(
                     titel = "${s.name} ${zeitText(s)}",
                     unterzeile = unterzeile,
                     gewaehlt = meine,
-                    hinweise = if (meine) emptyList() else PlanCheck.preview(plan, s.key, person.id, leute, abwesend),
+                    hinweise = if (meine) emptyList() else PlanCheck.preview(plan, s.key, person.id, leute, abwesend) + tauschHinweise,
                     tag = "wahl-${s.key.templateId}-${s.key.slot}",
                 ) { zeitFehler = null; uebernehmen(s.key) }
             }

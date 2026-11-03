@@ -18,10 +18,12 @@ object PlanSheet {
     fun hours(minutes: Long): String {
         val sign = if (minutes < 0) "-" else ""
         val m = kotlin.math.abs(minutes)
-        val whole = m / 60
-        val rest = m % 60
+        // Auf Hundertstel Stunden gerundet, damit z. B. 50 min als 0,83 erscheint.
+        val hundredths = (m * 100 + 30) / 60
+        val whole = hundredths / 100
+        val rest = hundredths % 100
         if (rest == 0L) return "$sign$whole"
-        val frac = (rest * 100 / 60).toString().padStart(2, '0').trimEnd('0')
+        val frac = rest.toString().padStart(2, '0').trimEnd('0')
         return "$sign$whole,$frac"
     }
 
