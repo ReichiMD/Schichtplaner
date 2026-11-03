@@ -32,6 +32,8 @@ class PlanScreenOnDeviceTest {
         compose.onNodeWithTag("wochen-pager").performScrollTo().performTouchInput { swipeLeft() }
         compose.waitForIdle()
         compose.onNodeWithText("Woche 2 von", substring = true).assertIsDisplayed()
+        // Wochentage bleiben oben stehen, sie gehören nicht zum Blätterbereich.
+        compose.onNodeWithText("Mo").assertIsDisplayed()
         compose.onNodeWithTag("wochen-pager").performScrollTo().performTouchInput { swipeRight() }
         compose.waitForIdle()
         compose.onNodeWithText("Woche 1 von", substring = true).assertIsDisplayed()
