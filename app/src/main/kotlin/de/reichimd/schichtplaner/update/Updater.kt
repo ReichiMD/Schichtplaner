@@ -1,7 +1,9 @@
 package de.reichimd.schichtplaner.update
 
 import android.content.Context
+import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.PackageInfo
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -64,9 +66,8 @@ class Updater(private val context: Context) {
             conn.disconnect()
         }
 
-        @Suppress("DEPRECATION")
         val info = context.packageManager.getPackageArchiveInfo(part.path, 0)
-        val code = info?.let { if (Build.VERSION.SDK_INT >= 28) it.longVersionCode else it.versionCode.toLong() }
+        val code = info?.let(::versionCodeOf)
         if (info == null || info.packageName != context.packageName || code != update.versionCode.toLong()) {
             part.delete()
             throw IOException("Die geladene Datei ist nicht die erwartete App-Version")
@@ -75,14 +76,26 @@ class Updater(private val context: Context) {
         apk
     }
 
+    @Suppress("DEPRECATION")
+    private fun versionCodeOf(info: PackageInfo): Long =
+        if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
+
     /** Darf diese App andere Apps installieren? Muss einmalig in den Einstellungen erlaubt werden. */
     fun canInstall(): Boolean = context.packageManager.canRequestPackageInstalls()
 
+    /** Wirft ActivityNotFoundException, wenn das Gerät keine passende Einstellungsseite hat. */
     fun openInstallPermissionSettings() {
-        context.startActivity(
-            Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-        )
+        val pkg = Uri.parse("package:${context.packageName}")
+        try {
+            context.startActivity(
+                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, pkg).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        } catch (e: ActivityNotFoundException) {
+            // Manche Geräte haben die Seite nicht: dann wenigstens die App-Infos öffnen.
+            context.startActivity(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkg).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
     }
 
     fun install(apk: File) {
@@ -109,15 +122,24 @@ class Updater(private val context: Context) {
     private fun get(url: String): String {
         val conn = open(url).apply { setRequestProperty("Accept", "application/vnd.github+json") }
         try {
-            if (conn.responseCode != HttpURLConnection.HTTP_OK) throw IOException("GitHub: HTTP ${conn.responseCode}")
+            val status = conn.responseCode
+            if (status == 403 || status == 429) throw RateLimitException()
+            if (status != HttpURLConnection.HTTP_OK) throw IOException("GitHub: HTTP $status")
             return conn.inputStream.bufferedReader().use { it.readText() }
         } finally {
             conn.disconnect()
         }
     }
 
+    /** GitHub erlaubt ohne Anmeldung 60 Abfragen pro Stunde und Anschluss. */
+    class RateLimitException : IOException("GitHub-Limit erreicht")
+
     companion object {
-        const val RELEASES_URL = "https://api.github.com/repos/ReichiMD/Schichtplaner/releases?per_page=30"
+        /**
+         * GitHub sortiert nach Erstellzeit, neueste zuerst. Weil jede Version höher sein muss als alle
+         * bisherigen (prüft der Release-Workflow), ist die neueste immer auf der ersten Seite.
+         */
+        const val RELEASES_URL = "https://api.github.com/repos/ReichiMD/Schichtplaner/releases?per_page=100"
 
         /** Liest die Antwort der GitHub-API. Unvollständige Einträge werden übersprungen. */
         fun parse(json: String): List<UpdateCheck.Release> {

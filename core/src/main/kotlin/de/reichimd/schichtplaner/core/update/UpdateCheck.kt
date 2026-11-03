@@ -34,15 +34,19 @@ object UpdateCheck {
             .filter { !it.draft && (includePrereleases || !it.prerelease) }
             .mapNotNull { r ->
                 val code = versionCodeOf(r.tag) ?: return@mapNotNull null
-                val apk = r.assets.firstOrNull { it.isUsableApk() } ?: return@mapNotNull null
-                Update(r.tag.removePrefix("v"), code, r.prerelease, apk.url, apk.size)
+                val name = r.tag.removePrefix("v")
+                // Genau die Datei, die der Release-Workflow anhängt, nie eine andere APK.
+                val apk = r.assets.firstOrNull { it.name == apkName(name) && it.isUsableApk() } ?: return@mapNotNull null
+                Update(name, code, r.prerelease, apk.url, apk.size)
             }
             .filter { it.versionCode > currentCode }
             .maxByOrNull { it.versionCode }
 
+    /** So nennt der Release-Workflow die APK. */
+    fun apkName(versionName: String) = "schichtplaner-$versionName.apk"
+
     private fun Asset.isUsableApk() =
-        name.endsWith(".apk", ignoreCase = true) &&
-            size in 1..MAX_APK_BYTES &&
+        size in 1..MAX_APK_BYTES &&
             url.startsWith(DOWNLOAD_PREFIX) &&
             !url.contains("..")
 

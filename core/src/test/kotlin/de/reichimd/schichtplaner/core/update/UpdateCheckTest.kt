@@ -65,11 +65,21 @@ class UpdateCheckTest {
 
     @Test
     fun `APKs von fremden Adressen oder mit unsinniger Groesse werden nicht geladen`() {
-        val fremd = Asset("schichtplaner.apk", "https://example.com/schichtplaner.apk", 8_000_000)
-        val umweg = Asset("x.apk", "${UpdateCheck.DOWNLOAD_PREFIX}../../evil/x.apk", 8_000_000)
-        val http = Asset("x.apk", UpdateCheck.DOWNLOAD_PREFIX.replace("https", "http") + "v0.2.0/x.apk", 8_000_000)
+        val n = "schichtplaner-0.2.0.apk"
+        val fremd = Asset(n, "https://example.com/$n", 8_000_000)
+        val umweg = Asset(n, "${UpdateCheck.DOWNLOAD_PREFIX}../../evil/$n", 8_000_000)
+        val http = Asset(n, UpdateCheck.DOWNLOAD_PREFIX.replace("https", "http") + "v0.2.0/$n", 8_000_000)
         listOf(fremd, umweg, http, apk("v0.2.0", size = 0), apk("v0.2.0", size = UpdateCheck.MAX_APK_BYTES + 1)).forEach {
             assertNull(UpdateCheck.newest(listOf(release("v0.2.0", assets = listOf(it))), 100), it.toString())
         }
+    }
+
+    @Test
+    fun `nur die APK mit dem Namen aus dem Release-Workflow wird genommen`() {
+        val p = UpdateCheck.DOWNLOAD_PREFIX
+        val debug = Asset("app-debug.apk", "${p}v0.2.0/app-debug.apk", 9_000_000)
+        val richtig = apk("v0.2.0")
+        assertNull(UpdateCheck.newest(listOf(release("v0.2.0", assets = listOf(debug))), 100))
+        assertEquals(richtig.url, UpdateCheck.newest(listOf(release("v0.2.0", assets = listOf(debug, richtig))), 100)?.apkUrl)
     }
 }

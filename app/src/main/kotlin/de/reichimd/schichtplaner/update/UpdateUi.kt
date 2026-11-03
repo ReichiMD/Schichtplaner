@@ -1,6 +1,7 @@
 package de.reichimd.schichtplaner.update
 
 import android.app.Application
+import android.content.ActivityNotFoundException
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -56,6 +57,8 @@ internal class UpdateViewModel(app: Application) : AndroidViewModel(app) {
         if (Updater.isReleaseBuild()) {
             updater.cleanUp()
             suchen(still = true)
+        } else {
+            zustand = UpdateZustand.NurTestbuild
         }
     }
 
@@ -104,13 +107,28 @@ internal class UpdateViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun nachLaden(update: UpdateCheck.Update, apk: File): UpdateZustand =
         if (updater.canInstall()) {
-            updater.install(apk)
-            UpdateZustand.Bereit(update, apk)
+            try {
+                updater.install(apk)
+                UpdateZustand.Bereit(update, apk)
+            } catch (e: ActivityNotFoundException) {
+                UpdateZustand.Fehler("Auf diesem Handy lässt sich der Installer nicht öffnen.", update)
+            }
         } else {
             UpdateZustand.BrauchtErlaubnis(update, apk)
         }
 
-    fun erlaubnisOeffnen() = updater.openInstallPermissionSettings()
+    fun erlaubnisOeffnen() {
+        try {
+            updater.openInstallPermissionSettings()
+        } catch (e: ActivityNotFoundException) {
+            val z = zustand as? UpdateZustand.BrauchtErlaubnis
+            zustand = UpdateZustand.Fehler(
+                "Die Einstellung lässt sich nicht öffnen. Bitte unter Einstellungen › Apps › Schichtplan " +
+                    "\"Unbekannte Apps installieren\" erlauben.",
+                z?.update,
+            )
+        }
+    }
 
     /** Nach dem Erlauben in den Einstellungen oder wenn der Installer abgebrochen wurde. */
     fun installieren(update: UpdateCheck.Update, apk: File) {
@@ -122,8 +140,9 @@ internal class UpdateViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun meldung(e: Exception) = when (e) {
+        is Updater.RateLimitException -> "GitHub hat gerade zu viele Anfragen. Bitte in einer Stunde nochmal versuchen."
         is IOException -> "Keine Verbindung zu GitHub oder Download fehlgeschlagen. ${e.message ?: ""}".trim()
-        else -> "${e::class.java.simpleName}: ${e.message}"
+        else -> "Die Antwort von GitHub war unerwartet. Bitte später nochmal versuchen."
     }
 }
 
@@ -206,8 +225,13 @@ internal fun VersionZeile(vm: UpdateViewModel = viewModel()) {
             fontSize = 12.sp,
             color = Leise,
         )
-        TextButton(onClick = { vm.suchen() }, enabled = vm.zustand !is UpdateZustand.Sucht && vm.zustand !is UpdateZustand.Laedt) {
-            Text("Nach Updates suchen", fontSize = 13.sp, color = Akzent)
+        // Nicht während Laden oder Installieren: sonst ginge eine fertig geladene APK verloren.
+        val z = vm.zustand
+        val frei = z is UpdateZustand.Still || z is UpdateZustand.Aktuell || z is UpdateZustand.Fehler
+        if (z !is UpdateZustand.NurTestbuild) {
+            TextButton(onClick = { vm.suchen() }, enabled = frei) {
+                Text("Nach Updates suchen", fontSize = 13.sp, color = Akzent)
+            }
         }
     }
 }
