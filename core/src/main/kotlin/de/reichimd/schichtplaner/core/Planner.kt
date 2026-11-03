@@ -1,7 +1,6 @@
 package de.reichimd.schichtplaner.core
 
 import org.chocosolver.solver.Model
-import org.chocosolver.solver.search.SearchState
 import org.chocosolver.solver.search.limits.FailCounter
 import org.chocosolver.solver.search.loop.lns.INeighborFactory
 import org.chocosolver.solver.search.strategy.Search
@@ -19,14 +18,15 @@ import kotlin.math.roundToInt
  * - höchstens eine Schicht pro Person und Tag
  * - kein Einsatz bei Urlaub, Krankheit oder an gesperrten Wochentagen
  * - nur Schichtarten, die die Person kann
- * - Mindest-Ruhezeit zwischen zwei Schichten
+ * - Mindest-Ruhezeit zwischen zwei Schichten, auch zur letzten Schicht vor dem Zeitraum
  * - höchstens [PlanningRules.maxConsecutiveDays] Arbeitstage am Stück
+ * - Aushilfen höchstens bis zu ihren (anteiligen) Monatsstunden
  *
  * Weiche Regeln (werden gewichtet möglichst gut erfüllt):
  * - jede Schicht besetzen (sehr hohes Gewicht; geht es nicht, landet sie in [Plan.unfilled])
  * - Aushilfen nur wenn nötig
  * - Frei-Wünsche erfüllen
- * - Monatsstunden anteilig treffen
+ * - Monatsstunden anteilig treffen (Urlaubs- und Krankheitstage verringern das Soll)
  * - Wochenendschichten gerecht nach Stundenanteil verteilen
  */
 object Planner {
@@ -37,7 +37,15 @@ object Planner {
     /** Fester Startwert: gleiche Eingabe ergibt (bei gleicher Rechenzeit) möglichst den gleichen Plan. */
     private const val RANDOM_SEED = 42L
 
-    fun plan(request: PlanningRequest, timeLimitMillis: Long = 5_000): Plan {
+    /** Rechenbudget: auf jedem Gerät gleich, damit gleiche Eingaben den gleichen Plan ergeben. */
+    const val DEFAULT_FAIL_LIMIT = 50_000L
+
+    /**
+     * @param timeLimitMillis Sicherheitsgrenze für sehr langsame Geräte. Greift sie vor dem Rechenbudget,
+     *   kann der Plan etwas schlechter und nicht mehr exakt reproduzierbar sein.
+     * @param failLimit Rechenbudget unabhängig von der Geschwindigkeit des Geräts (null = nur Zeitgrenze).
+     */
+    fun plan(request: PlanningRequest, timeLimitMillis: Long = 15_000, failLimit: Long? = DEFAULT_FAIL_LIMIT): Plan {
         val shifts = ShiftCalendar.shifts(request.firstDay, request.days, request.shop)
         val employees = request.employees
         val rules = request.rules
@@ -53,10 +61,18 @@ object Planner {
             .map { it.employeeId to it.date }
             .toSet()
 
+        val minRest = Duration.ofHours(rules.minRestHours)
+
+        fun restedSincePreviousPlan(e: Employee, s: Shift): Boolean {
+            val lastEnd = request.lastShiftEndBefore[e.id] ?: return true
+            return Duration.between(lastEnd, s.start) >= minRest
+        }
+
         fun eligible(e: Employee, s: Shift): Boolean =
             e.canWork(s.kind) &&
                 s.date.dayOfWeek !in e.blockedWeekdays &&
-                (e.id to s.date) !in blocked
+                (e.id to s.date) !in blocked &&
+                restedSincePreviousPlan(e, s)
 
         // x[s][e]: Person e arbeitet Schicht s. Nur für zulässige Paare angelegt.
         val x: Array<Array<BoolVar?>> = Array(shifts.size) { si ->
@@ -87,7 +103,6 @@ object Planner {
         }
 
         // Ruhezeit: zwei Schichten, zwischen denen weniger als minRestHours liegen, schließen sich aus.
-        val minRest = Duration.ofHours(rules.minRestHours)
         for (a in shifts.indices) for (b in shifts.indices) {
             val sa = shifts[a]
             val sb = shifts[b]
@@ -141,18 +156,33 @@ object Planner {
 
         // Monatsstunden anteilig auf den Zeitraum umgerechnet, in Viertelstunden.
         val regulars = employees.indices.filter { !employees[it].isBackup }
-        fun targetUnits(e: Employee): Int =
-            (e.monthlyHours * 60.0 * request.days / AVG_DAYS_PER_MONTH / UNIT_MINUTES).roundToInt()
+        // Urlaubs- und Krankheitstage verringern das Soll anteilig, sonst würde das volle Soll
+        // in die restlichen Tage gepresst.
+        val absentDays = blocked.groupingBy { it.first }.eachCount()
+        fun targetUnits(e: Employee): Int {
+            val presentDays = (request.days - (absentDays[e.id] ?: 0)).coerceAtLeast(0)
+            return (e.monthlyHours * 60.0 * presentDays / AVG_DAYS_PER_MONTH / UNIT_MINUTES).roundToInt()
+        }
+        fun units(s: Shift): Int = (s.paidMinutes.toDouble() / UNIT_MINUTES).roundToInt()
+
+        // Aushilfen: Monatsstunden (anteilig) sind eine harte Obergrenze, z. B. wegen Minijob-Grenze.
+        for (ei in employees.indices.filter { employees[it].isBackup }) {
+            val idx = shifts.indices.filter { x[it][ei] != null }
+            if (idx.isEmpty()) continue
+            val vars = idx.map<Int, IntVar> { x[it][ei]!! }.toTypedArray()
+            val cap = targetUnits(employees[ei])
+            model.scalar(vars, idx.map { units(shifts[it]) }.toIntArray(), "<=", cap).post()
+        }
 
         for (ei in regulars) {
             val e = employees[ei]
             val idx = shifts.indices.filter { x[it][ei] != null }
             val vars = idx.map<Int, IntVar> { x[it][ei]!! }.toTypedArray()
-            val units = idx.map { (shifts[it].paidMinutes / UNIT_MINUTES).toInt() }.toIntArray()
-            val maxUnits = units.sum()
+            val unitArr = idx.map { units(shifts[it]) }.toIntArray()
+            val maxUnits = unitArr.sum()
             val target = targetUnits(e)
             val worked = model.intVar("std_$ei", 0, maxUnits)
-            model.scalar(vars, units, "=", worked).post()
+            model.scalar(vars, unitArr, "=", worked).post()
             val dev = model.intVar("abw_$ei", 0, maxOf(target, maxUnits))
             model.arithm(worked, "-", dev, "<=", target).post()
             model.arithm(worked, "+", dev, ">=", target).post()
@@ -184,6 +214,7 @@ object Planner {
         // ---------- Lösen ----------
         val solver = model.solver
         solver.limitTime(timeLimitMillis)
+        failLimit?.let { solver.limitFail(it) }
 
         // Suche: Schicht für Schicht besetzen ("ja" zuerst), Reihenfolge der Personen pro Schicht
         // rotiert, damit der erste Plan schon halbwegs verteilt ist.
@@ -212,13 +243,12 @@ object Planner {
             }
             bestUnfilled = shifts.indices.filter { unfilled[it].value == 1 }
         }
-        val optimal = best != null && solver.searchState == SearchState.TERMINATED
 
         return Plan(
             assignments = best.orEmpty().map { (si, ei) -> Assignment(shifts[si], employees[ei].id) }
                 .sortedWith(compareBy({ it.shift.start }, { it.employeeId })),
             unfilled = bestUnfilled.map { shifts[it] },
-            optimal = optimal,
+            solved = best != null,
         )
     }
 }

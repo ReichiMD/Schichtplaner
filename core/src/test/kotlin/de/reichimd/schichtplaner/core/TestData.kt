@@ -10,6 +10,7 @@ import java.time.DayOfWeek.TUESDAY
 import java.time.DayOfWeek.WEDNESDAY
 import java.time.Duration
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.LocalTime
 import kotlin.test.assertTrue
 import kotlin.test.fail
@@ -60,10 +61,20 @@ object TestData {
         holidays: Set<LocalDate> = emptySet(),
         rules: PlanningRules = PlanningRules(),
         workedDaysBefore: Map<String, Int> = emptyMap(),
-    ) = PlanningRequest(MONDAY_START, days, shop(holidays), employees, absences, rules, workedDaysBefore)
+        lastShiftEndBefore: Map<String, LocalDateTime> = emptyMap(),
+    ) = PlanningRequest(MONDAY_START, days, shop(holidays), employees, absences, rules, workedDaysBefore, lastShiftEndBefore)
 
-    fun plan(request: PlanningRequest, seconds: Long = 3): Plan =
-        Planner.plan(request, timeLimitMillis = seconds * 1000).also { assertHardRules(request, it) }
+    /**
+     * Tests rechnen mit festem Rechenbudget (Fehlschläge) statt nur mit Zeit:
+     * so ist das Ergebnis auf jedem Rechner gleich und die Tests flackern nicht.
+     */
+    const val TEST_FAIL_LIMIT = 20_000L
+
+    fun plan(request: PlanningRequest, fails: Long = TEST_FAIL_LIMIT): Plan =
+        Planner.plan(request, timeLimitMillis = 120_000, failLimit = fails).also {
+            assertTrue(it.solved, "Planer hat keinen Plan gefunden")
+            assertHardRules(request, it)
+        }
 
     /** Prüft alle harten Regeln. Wird nach jedem Planerlauf aufgerufen. */
     fun assertHardRules(request: PlanningRequest, plan: Plan) {
@@ -87,6 +98,15 @@ object TestData {
 
         for (e in request.employees) {
             val shifts = plan.shiftsOf(e.id).sortedBy { it.start }
+            request.lastShiftEndBefore[e.id]?.let { lastEnd ->
+                shifts.firstOrNull()?.let { first ->
+                    val rest = Duration.between(lastEnd, first.start)
+                    assertTrue(
+                        rest >= Duration.ofHours(request.rules.minRestHours),
+                        "${e.name}: nur ${rest.toMinutes()} min Ruhe nach dem Vorplan",
+                    )
+                }
+            }
             val days = shifts.map { it.date }
             assertTrue(days.size == days.toSet().size, "${e.name} hat zwei Schichten an einem Tag")
 

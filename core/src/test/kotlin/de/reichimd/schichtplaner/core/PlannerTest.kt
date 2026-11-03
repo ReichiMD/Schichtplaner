@@ -8,6 +8,7 @@ import java.time.DayOfWeek
 import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class PlannerTest {
@@ -109,7 +110,7 @@ class PlannerTest {
     fun `Monatsstunden werden ungefaehr getroffen`() {
         val days = 28
         val r = request(days = days)
-        val p = plan(r, seconds = 8)
+        val p = plan(r)
         for (e in r.employees) {
             val target = e.monthlyHours * 60.0 * days / 30.4375
             val actual = p.paidMinutesOf(e.id)
@@ -122,8 +123,57 @@ class PlannerTest {
     fun `Wochenenden werden gleichmaessig verteilt`() {
         val equalTeam = listOf("a", "b", "c", "d", "e", "f").map { Employee(it, it.uppercase(), 95) }
         val r = request(employees = equalTeam, days = 28)
-        val p = plan(r, seconds = 8)
+        val p = plan(r)
         val counts = equalTeam.map { e -> p.shiftsOf(e.id).count { it.isWeekend } }
         assertTrue(counts.max() - counts.min() <= 1, "Wochenendschichten: $counts")
+    }
+
+    @Test
+    fun `Ruhezeit gilt auch zur letzten Schicht vor dem Zeitraum`() {
+        // Alle hatten Sonntag Spät bis 19:30: Montag früh (05:00/06:00) ist für niemanden erlaubt.
+        val lastEnd = MONDAY_START.minusDays(1).atTime(19, 30)
+        val r = request(lastShiftEndBefore = team().associate { it.id to lastEnd })
+        val p = plan(r)
+        assertTrue(p.assignments.none { it.shift.date == MONDAY_START && it.shift.kind == ShiftKind.EARLY })
+        assertEquals(2, p.unfilled.count { it.date == MONDAY_START && it.kind == ShiftKind.EARLY })
+    }
+
+    @Test
+    fun `Urlaub verringert das Stunden-Soll anteilig`() {
+        val days = 28
+        val absences = (0L until 14L).map { Absence("a", MONDAY_START.plusDays(it), AbsenceType.VACATION) }
+        val r = request(days = days, absences = absences)
+        val p = plan(r)
+        val target = 120 * 60.0 * (days - 14) / 30.4375
+        val actual = p.paidMinutesOf("a")
+        assertTrue(abs(actual - target) <= 7 * 60, "Anna: ${actual / 60.0} h statt ${target / 60.0} h")
+    }
+
+    @Test
+    fun `Aushilfen bleiben unter ihren Monatsstunden`() {
+        // Viel zu wenig Stammpersonal: die Aushilfe dürfte sonst fast alles übernehmen.
+        val employees = listOf(Employee("a", "Anna", 120), Employee("x", "Xenia", 40, isBackup = true))
+        val days = 14
+        val p = plan(request(employees = employees, days = days))
+        val cap = 40 * 60.0 * days / 30.4375
+        assertTrue(p.paidMinutesOf("x") <= cap + 7.5, "Xenia: ${p.paidMinutesOf("x") / 60.0} h")
+        assertTrue(p.shiftsOf("x").isNotEmpty())
+    }
+
+    @Test
+    fun `gleiche Eingabe ergibt gleichen Plan`() {
+        val r = request()
+        assertEquals(plan(r).assignments, plan(r).assignments)
+    }
+
+    @Test
+    fun `ungueltige Eingaben werden abgelehnt`() {
+        assertFailsWith<IllegalArgumentException> { request(days = 0) }
+        assertFailsWith<IllegalArgumentException> { request(days = 400) }
+        assertFailsWith<IllegalArgumentException> {
+            request(employees = listOf(Employee("a", "Anna", 80), Employee("a", "Anton", 80)))
+        }
+        assertFailsWith<IllegalArgumentException> { request(employees = listOf(Employee("a", "Anna", -5))) }
+        assertFailsWith<IllegalArgumentException> { Weights(unfilledShift = -1) }
     }
 }
