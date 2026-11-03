@@ -65,6 +65,9 @@ internal class TeamStore(dir: File) {
         }
     }
 
+    /** Ganzes Team ersetzen, z. B. beim Einspielen einer Sicherung. Gibt false zurück, wenn gesperrt. */
+    fun ersetzen(team: List<Employee>): Boolean = datei.aendern { team }
+
     fun meldungGelesen() = datei.meldungGelesen()
 
     /** Für Tests: wartet, bis geladen und alles geschrieben ist. */

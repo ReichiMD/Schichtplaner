@@ -53,6 +53,9 @@ internal class LadenStore(dir: File) {
         return emptyList()
     }
 
+    /** Alles ersetzen, z. B. beim Einspielen einer Sicherung. Ungeprüft wie beim Laden der Datei. */
+    fun ersetzen(laden: ShopSettings): Boolean = datei.aendern { laden }
+
     fun meldungGelesen() = datei.meldungGelesen()
 
     /** Für Tests: wartet, bis geladen und alles geschrieben ist. */

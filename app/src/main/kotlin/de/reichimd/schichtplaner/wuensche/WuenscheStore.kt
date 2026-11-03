@@ -3,6 +3,7 @@ package de.reichimd.schichtplaner.wuensche
 import android.content.Context
 import de.reichimd.schichtplaner.core.Absence
 import de.reichimd.schichtplaner.core.AbsenceType
+import de.reichimd.schichtplaner.core.backup.WishCleanup
 import de.reichimd.schichtplaner.core.wishes.Wishes
 import de.reichimd.schichtplaner.core.wishes.WishesCodec
 import de.reichimd.schichtplaner.daten.DateiSpeicher
@@ -44,6 +45,20 @@ internal class WuenscheStore(dir: File) {
     /** Alle Einträge einer Person entfernen, z. B. wenn sie aus dem Team gelöscht wird. */
     fun personEntfernen(mitarbeiterId: String): Boolean =
         datei.aendern { Wishes.removeEmployee(it, mitarbeiterId) }
+
+    /** Ganzen Kalender ersetzen, z. B. beim Einspielen einer Sicherung. */
+    fun ersetzen(eintraege: List<Absence>): Boolean = datei.aendern { eintraege }
+
+    /**
+     * Alte Monate und Einträge von Personen, die nicht mehr im Team sind, entfernen (siehe [WishCleanup]).
+     * Schreibt nur, wenn sich wirklich etwas ändert.
+     */
+    fun aufraeumen(teamIds: Set<String>?, behaltenAb: LocalDate) {
+        val z = zustand.value
+        if (!z.bearbeitbar) return
+        if (WishCleanup.clean(z.eintraege, teamIds, behaltenAb) == z.eintraege) return
+        datei.aendern { WishCleanup.clean(it, teamIds, behaltenAb) }
+    }
 
     fun meldungGelesen() = datei.meldungGelesen()
 

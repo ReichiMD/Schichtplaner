@@ -144,6 +144,8 @@ internal class PlanViewModel : ViewModel() {
             rechnung = try {
                 var ergebnis: Rechnung = Rechnung.Ruht
                 // Ändert sich Team, Laden oder Kalender während des Rechnens, wird gleich neu gerechnet (höchstens dreimal).
+                // Spielt jemand währenddessen eine Sicherung ein, bleibt deren Plan stehen.
+                var planVorher = planStore.zustand.first { !it.laedt }.plan
                 for (versuch in 1..3) {
                     // Mit dem gespeicherten Team, solange noch keins angelegt ist mit dem erfundenen Beispiel.
                     val team = teamStore.zustand.first { !it.laedt }.team
@@ -161,11 +163,15 @@ internal class PlanViewModel : ViewModel() {
                         laden != ladenStore.zustand.value.laden ||
                         wuensche != wuenscheStore.zustand.value.eintraege
                     ergebnis = when {
+                        planStore.zustand.value.plan !== planVorher ->
+                            Rechnung.Fehler("Der Plan wurde während der Berechnung ersetzt (z. B. durch eine Sicherung). Der jetzige Plan bleibt stehen.")
                         neu == null -> Rechnung.NichtGefunden
                         !planStore.ersetzen(neu) -> Rechnung.Fehler("Der neue Plan konnte nicht gespeichert werden. Der alte bleibt stehen.")
                         else -> Rechnung.Fertig(millis)
                     }
-                    if (!veraltet || ergebnis !is Rechnung.Fertig) break
+                    if (ergebnis !is Rechnung.Fertig) break
+                    planVorher = neu
+                    if (!veraltet) break
                 }
                 if (ergebnis is Rechnung.Fertig) {
                     woche = 0
@@ -346,6 +352,7 @@ internal fun PlanScreen(
                     offenAntippen = { tag -> offenerTag = tag.toString() },
                 )
                 Legende()
+                PdfKnoepfe(plan, leute, abwesend, Modifier.padding(horizontal = 8.dp))
                 WochenHinweise(plan, pager.currentPage, hinweise) { w -> if (aenderbar) feld = "${w.employeeId}|${w.key.date}" }
             }
         }

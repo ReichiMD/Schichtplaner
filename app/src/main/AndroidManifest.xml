@@ -21,7 +21,7 @@
             </intent-filter>
         </activity>
 
-        <!-- Gibt die geladene Update-APK an den Installer weiter, ohne den Cache freizugeben. -->
+        <!-- Gibt die geladene Update-APK an den Installer und das Plan-PDF zum Teilen weiter, ohne den restlichen Cache freizugeben. -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.updates"
