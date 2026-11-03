@@ -1,6 +1,6 @@
 # Schichtplaner
 
-Android-App, die einer Filialleitung im Einzelhandel (z. B. Bäckerei) den Wochen-Schichtplan abnimmt.
+Android-App, die einer Filialleitung im Einzelhandel den Wochen-Schichtplan abnimmt.
 
 - Mitarbeiter einmal anlegen (Vorname, Monatsstunden, welche Schichten möglich sind, Tage an denen jemand nie kann)
 - Urlaub und Frei-Wünsche im Kalender antippen

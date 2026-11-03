@@ -3,7 +3,7 @@
 ## Projekt
 Android-App (Kotlin) für die Schichtplanung einer kleinen Filiale mit ca. 10 Mitarbeitern.
 Zielnutzerin arbeitet lieber analog: Die App muss spürbar Arbeit abnehmen und darf kaum Tipparbeit verlangen.
-Fachliche Regeln: [docs/regeln.md](docs/regeln.md). Bei Widersprüchen gilt diese Datei und wird aktualisiert.
+Fachliche Regeln (allgemein): [docs/regeln.md](docs/regeln.md). Konkrete Ladendaten liegen bewusst nicht im Repo.
 
 ## Zusammenarbeit
 - Sprache: Deutsch. Direkt, ehrlich, knapp.
