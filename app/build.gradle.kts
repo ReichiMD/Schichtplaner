@@ -73,6 +73,15 @@ android {
     }
 }
 
+// Release-Builds nur mit Schlüssel: eine unsignierte Release-APK wäre nicht installierbar
+// und würde später Updates verwirren.
+gradle.taskGraph.whenReady {
+    val baustRelease = allTasks.any { it.project.path == ":app" && it.name.contains("Release") && it.name.startsWith("assemble") }
+    if (baustRelease && System.getenv("SIGNING_KEYSTORE_FILE") == null) {
+        throw GradleException("Release-Build ohne Signierschlüssel (SIGNING_KEYSTORE_FILE fehlt)")
+    }
+}
+
 dependencies {
     implementation(project(":core"))
 
@@ -84,6 +93,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     debugImplementation("androidx.compose.ui:ui-tooling")
     implementation("androidx.activity:activity-compose:1.9.3")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 

@@ -2,6 +2,9 @@ name: Release
 
 # Neue Version: Tag setzen, z. B. "v0.1.0". Dann wird eine signierte APK gebaut
 # und als GitHub-Release veröffentlicht. Die App prüft später genau diese Releases auf Updates.
+#
+# versionCode = Major * 10000 + Minor * 100 + Patch (v1.2.3 -> 10203). So steigt er immer mit der
+# Version und hängt nicht vom Namen dieser Datei ab. Minor und Patch dürfen höchstens 99 sein.
 on:
   push:
     tags: ["v*"]
@@ -22,6 +25,19 @@ jobs:
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v4
 
+      - name: Version aus dem Tag lesen
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "Tag '$GITHUB_REF_NAME' hat nicht das Format vX.Y.Z"; exit 1
+          fi
+          MAJOR=${BASH_REMATCH[1]}; MINOR=${BASH_REMATCH[2]}; PATCH=${BASH_REMATCH[3]}
+          if (( MINOR > 99 || PATCH > 99 )); then echo "Minor und Patch dürfen höchstens 99 sein"; exit 1; fi
+          echo "name=$MAJOR.$MINOR.$PATCH" >> "$GITHUB_OUTPUT"
+          echo "code=$(( MAJOR * 10000 + MINOR * 100 + PATCH ))" >> "$GITHUB_OUTPUT"
+
       - name: Planer-Tests
         run: ./gradlew :core:test --no-daemon
 
@@ -38,22 +54,35 @@ jobs:
           SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
           SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
           SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        shell: bash
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          ./gradlew :app:assembleRelease --no-daemon -PversionName="$VERSION" -PversionCode="${{ github.run_number }}"
-          cp app/build/outputs/apk/release/app-release.apk "schichtplaner-$VERSION.apk"
+          set -euo pipefail
+          ./gradlew :app:assembleRelease --no-daemon --no-configuration-cache \
+            -PversionName="${{ steps.version.outputs.name }}" -PversionCode="${{ steps.version.outputs.code }}"
+          cp app/build/outputs/apk/release/app-release.apk "schichtplaner-${{ steps.version.outputs.name }}.apk"
 
-      - name: Signatur prüfen
+      # Muss immer derselbe Schlüssel sein, sonst lassen sich Updates nicht installieren.
+      # Der Fingerabdruck ist öffentlich und kein Geheimnis.
+      - name: Signatur mit dem festen Schlüssel vergleichen
+        shell: bash
+        env:
+          ERWARTET: "23994a4dfd880f606793264f215f48561e857df297e5bef2404e4c80e6079a04"
         run: |
+          set -euo pipefail
           APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
-          "$APKSIGNER" verify --print-certs "schichtplaner-${GITHUB_REF_NAME#v}.apk" | grep -i "SHA-256"
+          IST=$("$APKSIGNER" verify --print-certs "schichtplaner-${{ steps.version.outputs.name }}.apk" \
+            | grep -i "certificate SHA-256 digest" | head -1 | awk '{print $NF}' | tr 'A-F' 'a-f')
+          echo "Fingerabdruck: $IST"
+          if [ "$IST" != "$ERWARTET" ]; then
+            echo "FALSCHER SCHLÜSSEL: erwartet $ERWARTET"; exit 1
+          fi
 
       - name: GitHub-Release erstellen
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" "schichtplaner-${GITHUB_REF_NAME#v}.apk" \
-            --title "Schichtplan ${GITHUB_REF_NAME#v}" \
+          gh release create "$GITHUB_REF_NAME" "schichtplaner-${{ steps.version.outputs.name }}.apk" \
+            --title "Schichtplan ${{ steps.version.outputs.name }}" \
             --generate-notes
 
       - name: Schlüssel entfernen

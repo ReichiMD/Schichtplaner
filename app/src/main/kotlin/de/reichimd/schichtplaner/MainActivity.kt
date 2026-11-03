@@ -32,8 +32,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,11 +40,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
 import de.reichimd.schichtplaner.core.Plan
 import de.reichimd.schichtplaner.core.Planner
 import de.reichimd.schichtplaner.core.PlanningRequest
 import de.reichimd.schichtplaner.core.Shift
 import de.reichimd.schichtplaner.core.ShiftKind
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -81,35 +83,48 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private sealed interface Zustand {
+internal sealed interface Zustand {
     data object Leer : Zustand
     data object Rechnet : Zustand
     data class Fertig(val request: PlanningRequest, val plan: Plan, val millis: Long) : Zustand
     data class Fehler(val meldung: String) : Zustand
 }
 
-@Composable
-private fun PlanScreen() {
-    var zustand by remember { mutableStateOf<Zustand>(Zustand.Leer) }
-    var woche by remember { mutableIntStateOf(0) }
-    val scope = rememberCoroutineScope()
+/**
+ * Hält den Zustand über Drehen des Handys hinweg. Die Berechnung läuft im ViewModel weiter
+ * und wird nicht bei jedem Drehen neu gestartet.
+ */
+internal class PlanViewModel : ViewModel() {
+    var zustand by mutableStateOf<Zustand>(Zustand.Leer)
+        private set
+    var woche by mutableIntStateOf(0)
 
     fun erstellen() {
+        if (zustand is Zustand.Rechnet) return
         zustand = Zustand.Rechnet
-        scope.launch {
+        woche = 0
+        viewModelScope.launch {
             zustand = try {
-                // Der Planer rechnet einige Sekunden: nie im UI-Thread.
+                // Der Planer rechnet einige Sekunden (höchstens 15 s): nie im UI-Thread.
                 withContext(Dispatchers.Default) {
                     val request = DemoData.request()
                     val start = System.currentTimeMillis()
                     val plan = Planner.plan(request)
                     Zustand.Fertig(request, plan, System.currentTimeMillis() - start)
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (t: Throwable) {
                 Zustand.Fehler("${t::class.java.simpleName}: ${t.message}")
             }
         }
     }
+}
+
+@Composable
+internal fun PlanScreen(vm: PlanViewModel = viewModel()) {
+    val zustand = vm.zustand
+    val woche = vm.woche
 
     Column(
         Modifier
@@ -133,7 +148,7 @@ private fun PlanScreen() {
         )
 
         Button(
-            onClick = ::erstellen,
+            onClick = vm::erstellen,
             enabled = zustand !is Zustand.Rechnet,
             colors = ButtonDefaults.buttonColors(containerColor = Akzent),
             shape = RoundedCornerShape(12.dp),
@@ -160,8 +175,8 @@ private fun PlanScreen() {
                 val ersterTag = z.request.firstDay.plusWeeks(woche.toLong())
                 WochenKopf(
                     ersterTag = ersterTag,
-                    zurueck = { if (woche > 0) woche-- },
-                    weiter = { if (woche < z.request.days / 7 - 1) woche++ },
+                    zurueck = { if (woche > 0) vm.woche-- },
+                    weiter = { if (woche < z.request.days / 7 - 1) vm.woche++ },
                 )
                 WochenRaster(z.request, z.plan, ersterTag)
                 Zusammenfassung(z)
