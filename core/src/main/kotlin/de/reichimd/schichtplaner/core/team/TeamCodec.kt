@@ -1,17 +1,18 @@
 package de.reichimd.schichtplaner.core.team
 
 import de.reichimd.schichtplaner.core.Employee
+import de.reichimd.schichtplaner.core.storage.DataFileException
+import de.reichimd.schichtplaner.core.storage.DataFileTooNewException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import java.time.DayOfWeek
 
-/** Die gespeicherte Teamliste ist unlesbar oder stammt aus einer neueren App-Version. */
-open class TeamFileException(message: String, cause: Throwable? = null) : Exception(message, cause)
+/** Die gespeicherte Teamliste ist unlesbar. Gleiche Ausnahme wie bei allen Dateien der App. */
+typealias TeamFileException = DataFileException
 
-/** Die Datei ist in Ordnung, aber von einer neueren App-Version geschrieben. Nicht anfassen. */
-class TeamFileTooNewException(val version: Int) :
-    TeamFileException("Teamliste stammt aus einer neueren App-Version ($version)")
+/** Die Teamliste stammt aus einer neueren App-Version. Nicht anfassen. */
+typealias TeamFileTooNewException = DataFileTooNewException
 
 /**
  * Speicherformat der Teamliste auf dem Handy (JSON).
@@ -75,7 +76,7 @@ object TeamCodec {
             throw TeamFileException("Teamliste ist kein gültiges Format", e)
         }
         if (file.version > VERSION) {
-            throw TeamFileTooNewException(file.version)
+            throw DataFileTooNewException(file.version, "Teamliste")
         }
         if (file.version < 1) throw TeamFileException("Unbekannte Version ${file.version}")
 

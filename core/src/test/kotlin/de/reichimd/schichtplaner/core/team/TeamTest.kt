@@ -1,6 +1,7 @@
 package de.reichimd.schichtplaner.core.team
 
 import de.reichimd.schichtplaner.core.Employee
+import de.reichimd.schichtplaner.core.Problem
 import java.time.DayOfWeek
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -19,14 +20,15 @@ class TeamTest {
     @Test
     fun leererNameWirdAbgelehnt() {
         val p = Team.problems(anna.copy(name = "   "), emptyList())
-        assertEquals(listOf("Bitte einen Vornamen eingeben."), p)
+        assertEquals(listOf(Problem(TeamField.NAME, "Bitte einen Vornamen eingeben.")), p)
     }
 
     @Test
     fun zuLangerNameWirdAbgelehnt() {
         val p = Team.problems(anna.copy(name = "A".repeat(Team.MAX_NAME_LENGTH + 1)), emptyList())
         assertEquals(1, p.size)
-        assertTrue(p[0].contains("zu lang"))
+        assertTrue(p[0].message.contains("zu lang"))
+        assertEquals(TeamField.NAME, p[0].field)
     }
 
     @Test
@@ -34,7 +36,7 @@ class TeamTest {
         val neu = Employee("3", " anna ", 40)
         val p = Team.problems(neu, listOf(anna, ben))
         assertEquals(1, p.size)
-        assertTrue(p[0].contains("gibt es schon"))
+        assertTrue(p[0].message.contains("gibt es schon"))
     }
 
     @Test
@@ -54,13 +56,15 @@ class TeamTest {
     fun wederFruehNochSpaetWirdAbgelehnt() {
         val p = Team.problems(anna.copy(canEarly = false, canLate = false), emptyList())
         assertEquals(1, p.size)
-        assertTrue(p[0].contains("nie eingeplant"))
+        assertEquals(TeamField.SHIFTS, p[0].field)
+        assertTrue(p[0].message.contains("nie eingeplant"))
     }
 
     @Test
     fun alleTageGesperrtWirdAbgelehnt() {
         val p = Team.problems(anna.copy(blockedWeekdays = DayOfWeek.entries.toSet()), emptyList())
         assertEquals(1, p.size)
+        assertEquals(TeamField.DAYS, p[0].field)
     }
 
     @Test

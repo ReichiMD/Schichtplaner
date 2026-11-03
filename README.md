@@ -1,6 +1,6 @@
 # Schichtplaner
 
-Android-App, die einer Filialleitung den Wochen-Schichtplan abnimmt. Alle Daten bleiben lokal auf dem Handy. Ins Internet geht die App nur für den Update-Check bei GitHub (dabei sieht GitHub die IP-Adresse und die App-Version).
+Android-App, die einer Filialleitung den Wochen-Schichtplan abnimmt. Team, Öffnungszeiten und Schichten werden in der App eingestellt. Alle Daten bleiben lokal auf dem Handy. Ins Internet geht die App nur für den Update-Check bei GitHub (dabei sieht GitHub die IP-Adresse und die App-Version).
 
 ## Aufbau
 

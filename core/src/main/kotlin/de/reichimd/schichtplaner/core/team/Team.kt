@@ -1,7 +1,12 @@
 package de.reichimd.schichtplaner.core.team
 
 import de.reichimd.schichtplaner.core.Employee
+import de.reichimd.schichtplaner.core.Problem
+import de.reichimd.schichtplaner.core.Weekdays
 import java.time.DayOfWeek
+
+/** Wo ein Problem beim Mitarbeiter angezeigt wird. */
+enum class TeamField { NAME, HOURS, SHIFTS, DAYS, GENERAL }
 
 /**
  * Regeln und Hilfen für die Teamliste, die die Filialleitung in der App pflegt.
@@ -41,23 +46,24 @@ object Team {
      * Prüft einen Mitarbeiter vor dem Speichern. Leere Liste = alles in Ordnung.
      * [others] ist das restliche Team (der Mitarbeiter selbst darf darin stehen, er wird über die ID erkannt).
      */
-    fun problems(employee: Employee, others: List<Employee>): List<String> {
-        val result = mutableListOf<String>()
+    fun problems(employee: Employee, others: List<Employee>): List<Problem<TeamField>> {
+        val result = mutableListOf<Problem<TeamField>>()
+        fun add(field: TeamField, message: String) { result += Problem(field, message) }
         val name = cleanName(employee.name)
         when {
-            name.isEmpty() -> result += "Bitte einen Vornamen eingeben."
-            name.length > MAX_NAME_LENGTH -> result += "Der Name ist zu lang (höchstens $MAX_NAME_LENGTH Zeichen)."
+            name.isEmpty() -> add(TeamField.NAME, "Bitte einen Vornamen eingeben.")
+            name.length > MAX_NAME_LENGTH -> add(TeamField.NAME, "Der Name ist zu lang (höchstens $MAX_NAME_LENGTH Zeichen).")
             others.any { it.id != employee.id && cleanName(it.name).equals(name, ignoreCase = true) } ->
-                result += "„$name“ gibt es schon. Bitte unterscheidbar machen, z. B. „$name B.“"
+                add(TeamField.NAME, "„$name“ gibt es schon. Bitte unterscheidbar machen, z. B. „$name B.“")
         }
         if (employee.monthlyHours !in MIN_HOURS..MAX_HOURS) {
-            result += "Die Monatsstunden müssen zwischen $MIN_HOURS und $MAX_HOURS liegen."
+            add(TeamField.HOURS, "Die Monatsstunden müssen zwischen $MIN_HOURS und $MAX_HOURS liegen.")
         }
         if (!employee.canEarly && !employee.canLate) {
-            result += "Mindestens Früh- oder Spätschicht muss gehen, sonst wird die Person nie eingeplant."
+            add(TeamField.SHIFTS, "Bitte Frühschicht, Spätschicht oder beides wählen. Sonst wird die Person nie eingeplant.")
         }
         if (employee.blockedWeekdays.size == DayOfWeek.entries.size) {
-            result += "An allen sieben Tagen gesperrt: So wird die Person nie eingeplant."
+            add(TeamField.DAYS, "An allen sieben Tagen gesperrt: So wird die Person nie eingeplant.")
         }
         return result
     }
@@ -71,17 +77,7 @@ object Team {
 
     fun remove(team: List<Employee>, id: String): List<Employee> = team.filterNot { it.id == id }
 
-    private val SHORT_DAY = mapOf(
-        DayOfWeek.MONDAY to "Mo",
-        DayOfWeek.TUESDAY to "Di",
-        DayOfWeek.WEDNESDAY to "Mi",
-        DayOfWeek.THURSDAY to "Do",
-        DayOfWeek.FRIDAY to "Fr",
-        DayOfWeek.SATURDAY to "Sa",
-        DayOfWeek.SUNDAY to "So",
-    )
-
-    fun shortDay(day: DayOfWeek): String = SHORT_DAY.getValue(day)
+    fun shortDay(day: DayOfWeek): String = Weekdays.short(day)
 
     /** Kurze Merkmale für die Teamliste, z. B. "Nur spät", "Nie Mo, Di", "Aushilfe". */
     fun tags(employee: Employee): List<String> {
