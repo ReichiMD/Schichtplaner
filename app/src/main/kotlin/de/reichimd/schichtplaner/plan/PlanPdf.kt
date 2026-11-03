@@ -242,7 +242,9 @@ internal object PlanPdf {
     fun datei(context: Context, plan: ShiftPlan, leute: List<Employee>, abwesend: List<Absence>): File {
         val dir = ordner(context)
         dir.mkdirs()
-        dir.listFiles()?.forEach { it.delete() }
+        // Nur alte PDFs weg: Ein gerade geteiltes liest die Ziel-App (WhatsApp, Drive) vielleicht noch.
+        val stunde = System.currentTimeMillis() - 60 * 60 * 1000L
+        dir.listFiles()?.filter { it.lastModified() < stunde }?.forEach { it.delete() }
         val ziel = File(dir, PlanPrint.fileName(plan))
         FileOutputStream(ziel).use { schreiben(PlanPrint.weeks(plan, leute, abwesend), it) }
         return ziel

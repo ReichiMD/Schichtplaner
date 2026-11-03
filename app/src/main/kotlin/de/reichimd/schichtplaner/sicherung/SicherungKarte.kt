@@ -21,6 +21,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -92,13 +93,33 @@ internal class SicherungViewModel : ViewModel() {
 
     fun lesen(context: Context, quelle: Uri) = arbeiten {
         frage = withContext(Dispatchers.IO) { Sicherung.lesen(context, quelle) }
+        frageIstRueckweg = false
     }
 
-    fun einspielen(speicher: Speicher) {
+    /** Gibt es einen Stand von vor dem letzten Einspielen? */
+    var rueckwegDa by mutableStateOf(false)
+        private set
+
+    fun rueckwegPruefen(context: Context) {
+        viewModelScope.launch { rueckwegDa = withContext(Dispatchers.IO) { Sicherung.rueckweg(context).exists() } }
+    }
+
+    /** true: die Frage gilt dem Stand von vor dem letzten Einspielen (der wird dann nicht überschrieben). */
+    var frageIstRueckweg by mutableStateOf(false)
+        private set
+
+    fun rueckwegLesen(context: Context) = arbeiten {
+        frage = withContext(Dispatchers.IO) { Sicherung.lesen(context, Uri.fromFile(Sicherung.rueckweg(context))) }
+        frageIstRueckweg = true
+    }
+
+    fun einspielen(context: Context, speicher: Speicher) {
         val daten = frage ?: return
+        val rueckweg = if (frageIstRueckweg) null else Sicherung.rueckweg(context)
         frage = null
         arbeiten {
-            Sicherung.einspielen(speicher, daten)
+            Sicherung.einspielen(speicher, daten, rueckweg)
+            if (rueckweg != null) rueckwegDa = true
             meldung = true to "Sicherung eingespielt: ${beschreibung(daten)}"
         }
     }
@@ -137,6 +158,8 @@ internal fun SicherungKarte(
     val oeffnen = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) vm.lesen(context, uri)
     }
+
+    LaunchedEffect(Unit) { vm.rueckwegPruefen(context) }
 
     val form = RoundedCornerShape(14.dp)
     Column(
@@ -188,6 +211,13 @@ internal fun SicherungKarte(
                     .testTag("zurueckholen"),
             ) { Text("Zurückholen", fontSize = 16.sp, color = Akzent, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) }
         }
+        if (vm.rueckwegDa) {
+            TextButton(
+                onClick = { vm.rueckwegLesen(context) },
+                enabled = !vm.arbeitet,
+                modifier = Modifier.testTag("rueckweg"),
+            ) { Text("Stand vor dem letzten Zurückholen wiederherstellen", fontSize = 14.sp, color = Akzent) }
+        }
         if (vm.arbeitet) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 CircularProgressIndicator(Modifier.size(20.dp), color = Akzent)
@@ -213,7 +243,7 @@ internal fun SicherungKarte(
     vm.frage?.let { daten ->
         AlertDialog(
             onDismissRequest = vm::abbrechen,
-            title = { Text("Sicherung einspielen?") },
+            title = { Text(if (vm.frageIstRueckweg) "Alten Stand wiederherstellen?" else "Sicherung einspielen?") },
             text = {
                 Text(
                     buildString {
@@ -222,6 +252,7 @@ internal fun SicherungKarte(
                         erstellt?.let { append(" vom ${it.format(TAG_ZEIT)} Uhr") }
                         append(":\n${beschreibung(daten)}.\n\n")
                         append("Alles, was jetzt auf diesem Handy steht (Team, Laden, Kalender und Plan), wird ersetzt.")
+                        if (!vm.frageIstRueckweg) append(" Der jetzige Stand wird vorher in der App aufbewahrt.")
                         if (erstellt != null && erstellt.toLocalDate().isBefore(LocalDate.now().minusDays(30))) {
                             append("\n\nAchtung: Die Sicherung ist älter als 30 Tage (${erstellt.format(TAG)}).")
                         }
@@ -229,7 +260,7 @@ internal fun SicherungKarte(
                 )
             },
             confirmButton = {
-                TextButton(onClick = { vm.einspielen(speicher) }, modifier = Modifier.testTag("einspielen")) {
+                TextButton(onClick = { vm.einspielen(context, speicher) }, modifier = Modifier.testTag("einspielen")) {
                     Text("Einspielen", color = Akzent, fontWeight = FontWeight.Bold)
                 }
             },

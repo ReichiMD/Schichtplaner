@@ -2,6 +2,7 @@ package de.reichimd.schichtplaner.sicherung
 
 import android.content.Context
 import android.net.Uri
+import android.provider.DocumentsContract
 import de.reichimd.schichtplaner.BuildConfig
 import de.reichimd.schichtplaner.core.backup.BackupCodec
 import de.reichimd.schichtplaner.core.backup.BackupData
@@ -16,8 +17,12 @@ import de.reichimd.schichtplaner.team.TeamStore
 import de.reichimd.schichtplaner.team.team
 import de.reichimd.schichtplaner.wuensche.WuenscheStore
 import de.reichimd.schichtplaner.wuensche.eintraege
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileNotFoundException
 import java.io.IOException
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -81,18 +86,35 @@ internal object Sicherung {
         )
     }
 
-    /** Läuft im Hintergrund (Dateizugriff). */
+    /** Datei im App-Ordner mit dem Stand vor dem letzten Einspielen, als Rückweg bei falscher Datei. */
+    fun rueckweg(context: Context) = File(context.filesDir, RUECKWEG)
+
+    private const val RUECKWEG = "stand-vor-dem-einspielen.json"
+
+    /** Läuft im Hintergrund (Dateizugriff). Geht es schief, wird die angefangene Datei wieder entfernt. */
     fun schreiben(context: Context, ziel: Uri, daten: BackupData) {
         val text = BackupCodec.encode(daten).toByteArray(Charsets.UTF_8)
+        val resolver = context.contentResolver
+        fun oeffnen(modus: String) = resolver.openOutputStream(ziel, modus)
+            ?: throw SicherungsFehler("Die Datei ließ sich nicht anlegen.")
         try {
-            // "wt": vorhandene Datei vollständig ersetzen, nicht nur vorne überschreiben.
-            val out = context.contentResolver.openOutputStream(ziel, "wt")
-                ?: throw SicherungsFehler("Die Datei ließ sich nicht anlegen.")
+            // "wt": vorhandene Datei vollständig ersetzen. Manche Ablagen kennen nur "w" (die neue Datei ist ohnehin leer).
+            val out = try {
+                oeffnen("wt")
+            } catch (e: IllegalArgumentException) {
+                oeffnen("w")
+            } catch (e: FileNotFoundException) {
+                oeffnen("w")
+            }
             out.use { it.write(text) }
-        } catch (e: IOException) {
-            throw SicherungsFehler("Die Sicherung ließ sich nicht schreiben: ${e.message ?: "unbekannter Fehler"}")
-        } catch (e: SecurityException) {
-            throw SicherungsFehler("Die App darf dort nicht schreiben. Bitte einen anderen Ort wählen.")
+        } catch (e: Exception) {
+            // Eine leere oder halbe Datei sähe sonst wie eine Sicherung aus.
+            if (ziel.scheme == "content") runCatching { DocumentsContract.deleteDocument(resolver, ziel) }
+            throw when (e) {
+                is SicherungsFehler -> e
+                is SecurityException -> SicherungsFehler("Die App darf dort nicht schreiben. Bitte einen anderen Ort wählen.")
+                else -> SicherungsFehler("Die Sicherung ließ sich nicht schreiben: ${e.message ?: "unbekannter Fehler"}")
+            }
         }
     }
 
@@ -132,10 +154,28 @@ internal object Sicherung {
      * Ersetzt alles auf dem Handy durch die Sicherung. Vorher wird geprüft, dass kein Speicher gesperrt ist,
      * damit nicht nur ein Teil ersetzt wird. Alte Monate und verwaiste Wünsche werden dabei aufgeräumt.
      */
-    suspend fun einspielen(speicher: Speicher, daten: BackupData, heute: LocalDate = LocalDate.now()) {
+    suspend fun einspielen(
+        speicher: Speicher,
+        daten: BackupData,
+        /** Hierhin kommt vorher der jetzige Stand, damit eine falsch gewählte Datei nichts zerstört. null = nicht sichern. */
+        rueckweg: File?,
+        heute: LocalDate = LocalDate.now(),
+    ) {
         speicher.geladen()
         speicher.gesperrt()?.let {
             throw SicherungsFehler("Einspielen geht gerade nicht, weil $it gesperrt ist. Es wurde nichts geändert.")
+        }
+        if (rueckweg != null) {
+            val vorher = BackupCodec.encode(stand(speicher))
+            try {
+                withContext(Dispatchers.IO) {
+                    val neu = File(rueckweg.parentFile, rueckweg.name + ".neu")
+                    neu.writeText(vorher, Charsets.UTF_8)
+                    if (!neu.renameTo(rueckweg)) throw IOException("Umbenennen fehlgeschlagen")
+                }
+            } catch (e: IOException) {
+                throw SicherungsFehler("Der jetzige Stand ließ sich nicht vorher sichern (${e.message}). Es wurde nichts geändert.")
+            }
         }
         val teamIds = daten.team.map { it.id }.toSet().takeIf { it.isNotEmpty() }
         val wuensche = WishCleanup.clean(daten.wishes, teamIds, WishCleanup.keepFrom(heute, daten.plan))

@@ -83,7 +83,8 @@ object BackupCodec {
      */
     fun decode(text: String): BackupData {
         val file = try {
-            json.decodeFromString(FileV1.serializer(), text)
+            // Am PC gespeicherte Dateien beginnen manchmal mit einem unsichtbaren BOM-Zeichen.
+            json.decodeFromString(FileV1.serializer(), text.removePrefix("\uFEFF"))
         } catch (e: SerializationException) {
             throw DataFileException("Das ist keine Sicherung des Schichtplaners.", e)
         } catch (e: IllegalArgumentException) {
@@ -106,11 +107,16 @@ object BackupCodec {
             throw DataFileException("$was in der Sicherung ist beschädigt (${e.message}).", e)
         }
 
-        val team = lesen("Das Team") { TeamCodec.decode(teil(file.team, "das Team")) }
-        val shop = lesen("Der Laden") { ShopCodec.decode(teil(file.laden, "der Laden")) }
-        val wishes = lesen("Der Wünsche-Kalender") { WishesCodec.decode(teil(file.wuensche, "der Wünsche-Kalender")) }
+        val teamText = teil(file.team, "das Team")
+        val ladenText = teil(file.laden, "der Laden")
+        val wuenscheText = teil(file.wuensche, "der Wünsche-Kalender")
         // Ein fehlender Plan ist erlaubt (es gab noch keinen).
-        val plan = lesen("Der Plan") { file.plan?.takeIf { it !is JsonNull }?.let { PlanCodec.decode(teil(it, "der Plan")) } }
+        val planText = file.plan?.takeIf { it !is JsonNull }?.let { teil(it, "der Plan") }
+
+        val team = lesen("Das Team") { TeamCodec.decode(teamText) }
+        val shop = lesen("Der Laden") { ShopCodec.decode(ladenText) }
+        val wishes = lesen("Der Wünsche-Kalender") { WishesCodec.decode(wuenscheText) }
+        val plan = lesen("Der Plan") { planText?.let { PlanCodec.decode(it) } }
 
         // Dieselben Regeln wie beim Speichern einer Person, sonst stünden Werte drin, die sich nicht mehr speichern lassen.
         team.forEach { e ->

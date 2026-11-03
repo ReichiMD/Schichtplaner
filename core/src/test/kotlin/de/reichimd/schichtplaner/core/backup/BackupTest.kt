@@ -96,7 +96,7 @@ class BackupTest {
     fun fehlenderTeilWirdAbgelehnt() {
         val text = """{"format":"schichtplaner-sicherung","version":1,"laden":null}"""
         val e = assertFailsWith<DataFileException> { BackupCodec.decode(text) }
-        assertTrue("fehlt das Team" in e.message!!, e.message)
+        assertEquals("In der Sicherung fehlt das Team.", e.message)
     }
 
     @Test
@@ -136,6 +136,11 @@ class BackupTest {
     fun unbekannteFelderWerdenUeberlesen() {
         val text = BackupCodec.encode(daten).replaceFirst("{", "{\"neuesFeld\": [1, 2],")
         assertEquals(daten, BackupCodec.decode(text))
+    }
+
+    @Test
+    fun dateiMitBomWirdGelesen() {
+        assertEquals(daten, BackupCodec.decode("\uFEFF" + BackupCodec.encode(daten)))
     }
 
     @Test

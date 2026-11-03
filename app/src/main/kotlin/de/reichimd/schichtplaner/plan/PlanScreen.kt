@@ -164,7 +164,7 @@ internal class PlanViewModel : ViewModel() {
                         wuensche != wuenscheStore.zustand.value.eintraege
                     ergebnis = when {
                         planStore.zustand.value.plan !== planVorher ->
-                            Rechnung.Fehler("Während der Berechnung wurde eine Sicherung eingespielt. Deren Plan bleibt stehen.")
+                            Rechnung.Fehler("Der Plan wurde während der Berechnung ersetzt (z. B. durch eine Sicherung). Der jetzige Plan bleibt stehen.")
                         neu == null -> Rechnung.NichtGefunden
                         !planStore.ersetzen(neu) -> Rechnung.Fehler("Der neue Plan konnte nicht gespeichert werden. Der alte bleibt stehen.")
                         else -> Rechnung.Fertig(millis)

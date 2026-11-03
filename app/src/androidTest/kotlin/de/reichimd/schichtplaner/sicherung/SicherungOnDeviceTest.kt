@@ -96,7 +96,8 @@ class SicherungOnDeviceTest {
         val neu = speicher("neu")
         warte { neu.fertig() }
         val gelesen = Sicherung.lesen(context, Uri.fromFile(datei))
-        warte { Sicherung.einspielen(neu, gelesen, heute) }
+        val rueckweg = File(wurzel, "rueckweg.json")
+        warte { Sicherung.einspielen(neu, gelesen, rueckweg, heute) }
         warte { neu.fertig() }
 
         // Wie nach einem Neustart: alles frisch aus den Dateien lesen.
@@ -106,6 +107,11 @@ class SicherungOnDeviceTest {
         assertEquals(4, neustart.laden.zustand.value.laden.planWeeks)
         assertEquals(listOf(Absence("a", mo, AbsenceType.VACATION)), neustart.wuensche.zustand.value.eintraege)
         assertEquals(plan, neustart.plan.zustand.value.plan)
+
+        // Der vorherige (leere) Stand liegt als Rückweg bereit.
+        val vorher = Sicherung.lesen(context, Uri.fromFile(rueckweg))
+        assertEquals(emptyList<Employee>(), vorher.team)
+        assertNull(vorher.plan)
     }
 
     @Test
