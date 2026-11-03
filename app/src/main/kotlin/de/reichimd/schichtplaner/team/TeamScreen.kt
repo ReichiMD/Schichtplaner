@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package de.reichimd.schichtplaner.team
 
 import androidx.activity.compose.BackHandler
