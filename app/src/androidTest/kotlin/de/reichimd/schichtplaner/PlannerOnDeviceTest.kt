@@ -2,6 +2,7 @@ package de.reichimd.schichtplaner
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import de.reichimd.schichtplaner.core.Planner
+import de.reichimd.schichtplaner.core.team.Team
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -35,5 +36,13 @@ class PlannerOnDeviceTest {
             }
         }
         println("Planer auf Android: $millis ms")
+    }
+
+    @Test
+    fun beispielTeamLaesstSichVerplanen() {
+        val request = DemoData.request(LocalDate.of(2026, 11, 3), employees = Team.EXAMPLE)
+        val plan = Planner.plan(request)
+        assertTrue("kein Plan gefunden", plan.solved)
+        assertTrue("unbesetzt: ${plan.unfilled.size}", plan.unfilled.isEmpty())
     }
 }

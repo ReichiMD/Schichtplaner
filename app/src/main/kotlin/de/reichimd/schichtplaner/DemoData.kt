@@ -15,7 +15,7 @@ import java.time.temporal.TemporalAdjusters
 
 /**
  * Erfundene Beispieldaten für die erste Test-App. Keine echten Namen.
- * Später werden Laden und Team in der App eingegeben und auf dem Gerät gespeichert.
+ * Das Team wird inzwischen in der App gepflegt; der Laden folgt in einem späteren Schritt.
  */
 object DemoData {
 
@@ -49,10 +49,10 @@ object DemoData {
     )
 
     /** Zwei Wochen ab dem nächsten Montag. */
-    fun request(today: LocalDate = LocalDate.now()) = PlanningRequest(
+    fun request(today: LocalDate = LocalDate.now(), employees: List<Employee> = team) = PlanningRequest(
         firstDay = today.with(TemporalAdjusters.next(DayOfWeek.MONDAY)),
         days = 14,
         shop = shop,
-        employees = team,
+        employees = employees,
     )
 }
