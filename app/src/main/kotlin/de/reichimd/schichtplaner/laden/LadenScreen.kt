@@ -68,6 +68,7 @@ import de.reichimd.schichtplaner.core.shop.Shop
 import de.reichimd.schichtplaner.core.shop.ShopField
 import de.reichimd.schichtplaner.core.shop.ShopSettings
 import de.reichimd.schichtplaner.core.shop.TemplatePart
+import de.reichimd.schichtplaner.sicherung.SicherungKarte
 import de.reichimd.schichtplaner.team.TeamStore
 import de.reichimd.schichtplaner.team.team
 import de.reichimd.schichtplaner.ui.Abschnitt
@@ -263,6 +264,9 @@ private fun LadenUebersicht(zustand: LadenZustand, store: LadenStore, teamMonats
                 }
             }
         }
+
+        // Alle Daten in eine Datei sichern oder zurückholen
+        SicherungKarte()
     }
 }
 

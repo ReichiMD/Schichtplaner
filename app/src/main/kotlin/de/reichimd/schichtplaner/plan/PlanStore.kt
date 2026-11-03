@@ -40,6 +40,9 @@ internal class PlanStore(dir: File) {
     /** Änderung von Hand am vorhandenen Plan. Ohne Plan passiert nichts. */
     fun aendern(wie: (ShiftPlan) -> ShiftPlan): Boolean = datei.aendern { it?.let(wie) }
 
+    /** Plan aus einer Sicherung übernehmen; null = kein Plan. */
+    fun ersetzenOderLeeren(plan: ShiftPlan?): Boolean = datei.aendern { plan }
+
     fun meldungGelesen() = datei.meldungGelesen()
 
     /** Für Tests: wartet, bis geladen und alles geschrieben ist. */
