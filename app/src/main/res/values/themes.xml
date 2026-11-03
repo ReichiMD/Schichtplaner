@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.Schichtplaner" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">#FBF8F3</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowBackground">@color/hintergrund</item>
+    </style>
+</resources>

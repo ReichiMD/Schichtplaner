@@ -28,3 +28,10 @@ dependencyResolutionManagement {
 
 rootProject.name = "schichtplaner"
 include(":core")
+
+// Lokal ohne Android-SDK (z. B. in der Cloud-Umgebung): ./gradlew -PohneApp :core:test
+if (providers.gradleProperty("ohneApp").isPresent) {
+    rootProject.buildFileName = "build-core.gradle.kts"
+} else {
+    include(":app")
+}

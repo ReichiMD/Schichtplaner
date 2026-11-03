@@ -25,3 +25,58 @@ jobs:
         with:
           name: testberichte
           path: core/build/reports/tests/
+
+  app:
+    name: App bauen
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Debug-APK bauen
+        run: ./gradlew :app:assembleDebug --no-daemon
+      - name: Debug-APK hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: schichtplaner-debug
+          path: app/build/outputs/apk/debug/*.apk
+
+  android:
+    name: Planer auf Android ${{ matrix.api }} (Emulator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        # 26 = älteste unterstützte Version (minSdk), 30 = aktuelleres Android
+        api: [26, 30]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: KVM für den Emulator freischalten
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Test auf dem Emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          target: default
+          disable-animations: true
+          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon
+      - name: Testberichte hochladen
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-testberichte-${{ matrix.api }}
+          path: app/build/reports/androidTests/
