@@ -65,16 +65,16 @@ class PlanScreenOnDeviceTest {
         compose.onNodeWithText("Plan erstellen", substring = true).performClick()
         compose.waitUntil(60_000) { compose.onAllNodes(hasTestTag("wochen-pager")).fetchSemanticsNodes().isNotEmpty() }
 
-        compose.onNodeWithText("Woche 1 von", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Woche 1 von", substring = true).performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("wochen-pager").performScrollTo().performTouchInput { swipeLeft() }
         compose.waitForIdle()
-        compose.onNodeWithText("Woche 2 von", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Woche 2 von", substring = true).performScrollTo().assertIsDisplayed()
         // Wochentage bleiben oben stehen, sie gehören nicht zum Blätterbereich.
-        compose.onNodeWithText("Mo").assertIsDisplayed()
+        compose.onNodeWithText("Mo").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("wochen-pager").performScrollTo().performTouchInput { swipeRight() }
         compose.waitForIdle()
-        compose.onNodeWithText("Woche 1 von", substring = true).assertIsDisplayed()
-        compose.onNodeWithText("ges. Std.").assertIsDisplayed()
+        compose.onNodeWithText("Woche 1 von", substring = true).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("ges. Std.").performScrollTo().assertIsDisplayed()
 
         warte { planStore.warten() }
         assertNotNull(warte { PlanStore(dir).warten() }.plan)
@@ -114,7 +114,7 @@ class PlanScreenOnDeviceTest {
         warte { planStore.warten() }
 
         compose.setContent { PlanScreen(team, LadenStore(dir), WuenscheStore(dir), planStore) }
-        compose.onNodeWithTag("zusammenfassung").assertTextContains("1 Schicht offen", substring = true)
+        compose.onNodeWithTag("zusammenfassung").performScrollTo().assertTextContains("1 Schicht offen", substring = true)
 
         // Anna übernimmt die Spätschicht, Ben bekommt dafür ihre Frühschicht.
         compose.onNodeWithTag("zelle-a-$mo").performScrollTo().performClick()
@@ -130,7 +130,7 @@ class PlanScreenOnDeviceTest {
         compose.onNodeWithTag("fertig").performScrollTo().performClick()
         p = warte { planStore.warten() }.plan!!
         assertEquals("c", p.slot(SlotKey(mo, "f2", 0))!!.employeeId)
-        compose.onNodeWithTag("zusammenfassung").assertTextContains("Alle Schichten besetzt", substring = true)
+        compose.onNodeWithTag("zusammenfassung").performScrollTo().assertTextContains("Alle Schichten besetzt", substring = true)
 
         // Claras Beginn eine Viertelstunde später.
         compose.onNodeWithTag("zelle-c-$mo").performScrollTo().performClick()
