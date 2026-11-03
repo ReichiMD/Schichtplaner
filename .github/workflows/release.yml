@@ -5,9 +5,29 @@ name: Release
 #
 # versionCode = Major * 10000 + Minor * 100 + Patch (v1.2.3 -> 10203). So steigt er immer mit der
 # Version und hängt nicht vom Namen dieser Datei ab. Minor und Patch dürfen höchstens 99 sein.
+#
+# Alternativ ohne Tag: Actions -> Release -> "Run workflow" mit Version (z. B. 0.1.0).
+# Dann setzt der Workflow den Tag selbst. Läuft nur auf main.
+#
+# Testversionen werden als "Vorabversion" (Pre-release) veröffentlicht. Sie sind genauso signiert,
+# lassen sich also einfach über die vorige Version installieren.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version, z. B. 0.1.0"
+        required: true
+      testversion:
+        description: "Als Vorabversion (Testversion) markieren"
+        type: boolean
+        default: true
+
+# Nie zwei Releases gleichzeitig: sonst könnten beide dieselbe Version prüfen und anlegen.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -19,24 +39,58 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Version prüfen
+        id: version
+        shell: bash
+        env:
+          EINGABE: ${{ inputs.version }}
+          TESTVERSION: ${{ inputs.testversion }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            if [ "$GITHUB_REF" != "refs/heads/main" ]; then echo "Releases nur von main"; exit 1; fi
+            TAG="v${EINGABE#v}"
+            VORAB="$TESTVERSION"
+          else
+            TAG="$GITHUB_REF_NAME"
+            VORAB="false"
+          fi
+          # Keine führenden Nullen (sonst rechnet die Shell oktal und 1.010.0 wäre doppelt zu 1.10.0).
+          NUM='(0|[1-9][0-9]*)'
+          if [[ ! "$TAG" =~ ^v$NUM\.$NUM\.$NUM$ ]]; then
+            echo "Version '$TAG' hat nicht das Format X.Y.Z (ohne führende Nullen)"; exit 1
+          fi
+          MAJOR=${BASH_REMATCH[1]}; MINOR=${BASH_REMATCH[2]}; PATCH=${BASH_REMATCH[3]}
+          if (( MINOR > 99 || PATCH > 99 )); then echo "Minor und Patch dürfen höchstens 99 sein"; exit 1; fi
+          CODE=$(( MAJOR * 10000 + MINOR * 100 + PATCH ))
+
+          # versionCode darf nie sinken, sonst lassen sich Updates nicht installieren.
+          VORHANDEN=$(git ls-remote --tags --refs origin 'v*') || { echo "Tags konnten nicht gelesen werden"; exit 1; }
+          HOECHSTER=0
+          while read -r _ REF; do
+            [ -z "${REF:-}" ] && continue
+            T="${REF#refs/tags/}"
+            [ "$T" = "$TAG" ] && [ "$GITHUB_EVENT_NAME" = "push" ] && continue
+            if [ "$T" = "$TAG" ]; then echo "Version $TAG gibt es schon"; exit 1; fi
+            if [[ "$T" =~ ^v$NUM\.$NUM\.$NUM$ ]]; then
+              C=$(( BASH_REMATCH[1] * 10000 + BASH_REMATCH[2] * 100 + BASH_REMATCH[3] ))
+              (( C > HOECHSTER )) && HOECHSTER=$C
+            fi
+          done <<< "$VORHANDEN"
+          if (( CODE <= HOECHSTER )); then
+            echo "Version $TAG ($CODE) ist nicht höher als die höchste vorhandene ($HOECHSTER)"; exit 1
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "name=$MAJOR.$MINOR.$PATCH" >> "$GITHUB_OUTPUT"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "vorab=$VORAB" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v4
-
-      - name: Version aus dem Tag lesen
-        id: version
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ ! "$GITHUB_REF_NAME" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-            echo "Tag '$GITHUB_REF_NAME' hat nicht das Format vX.Y.Z"; exit 1
-          fi
-          MAJOR=${BASH_REMATCH[1]}; MINOR=${BASH_REMATCH[2]}; PATCH=${BASH_REMATCH[3]}
-          if (( MINOR > 99 || PATCH > 99 )); then echo "Minor und Patch dürfen höchstens 99 sein"; exit 1; fi
-          echo "name=$MAJOR.$MINOR.$PATCH" >> "$GITHUB_OUTPUT"
-          echo "code=$(( MAJOR * 10000 + MINOR * 100 + PATCH ))" >> "$GITHUB_OUTPUT"
 
       - name: Planer-Tests
         run: ./gradlew :core:test --no-daemon
@@ -81,8 +135,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" "schichtplaner-${{ steps.version.outputs.name }}.apk" \
+          gh release create "${{ steps.version.outputs.tag }}" "schichtplaner-${{ steps.version.outputs.name }}.apk" \
+            --target "$GITHUB_SHA" \
             --title "Schichtplan ${{ steps.version.outputs.name }}" \
+            --prerelease="${{ steps.version.outputs.vorab }}" \
             --generate-notes
 
       - name: Schlüssel entfernen
