@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Kalenderblatt -->
+    <path
+        android:fillColor="#FBF8F3"
+        android:pathData="M34,38h40a4,4 0,0 1,4 4v30a4,4 0,0 1,-4 4h-40a4,4 0,0 1,-4 -4v-30a4,4 0,0 1,4 -4z" />
+    <path
+        android:fillColor="#F6D9B8"
+        android:pathData="M30,42a4,4 0,0 1,4 -4h40a4,4 0,0 1,4 4v6h-48z" />
+    <path
+        android:fillColor="#8A3A12"
+        android:pathData="M38,54h8v6h-8zM50,54h8v6h-8zM62,54h8v6h-8zM38,64h8v6h-8zM50,64h8v6h-8z" />
+</vector>

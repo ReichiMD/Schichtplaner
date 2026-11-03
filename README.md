@@ -5,6 +5,8 @@ Android-App, die einer Filialleitung den Wochen-Schichtplan abnimmt. Alles bleib
 ## Aufbau
 
 - `core/`: Datenmodell und Planer (reines Kotlin, Constraint-Solver [Choco](https://choco-solver.org)). Läuft ohne Android und ist komplett automatisch getestet.
-- `app/`: die Android-App (folgt).
+- `app/`: die Android-App (Jetpack Compose).
 
-Tests lokal ausführen: `./gradlew :core:test`
+Tests lokal ausführen: `./gradlew :core:test` (ohne Android-SDK: `./gradlew -PohneApp :core:test`)
+
+Neue Version veröffentlichen: Tag `vX.Y.Z` pushen, der Release-Workflow baut die signierte APK.
