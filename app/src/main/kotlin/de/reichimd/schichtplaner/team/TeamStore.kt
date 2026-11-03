@@ -48,6 +48,11 @@ internal class TeamStore(dir: File) {
         return emptyList()
     }
 
+    /** Person eine Zeile nach oben oder unten, wie die Reihenfolge auf dem Papierplan. */
+    fun verschieben(id: String, hoch: Boolean) {
+        datei.aendern { Team.move(it, id, hoch) }
+    }
+
     fun loeschen(id: String) {
         datei.aendern { Team.remove(it, id) }
     }

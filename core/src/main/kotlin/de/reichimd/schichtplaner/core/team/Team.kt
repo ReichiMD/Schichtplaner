@@ -77,6 +77,18 @@ object Team {
 
     fun remove(team: List<Employee>, id: String): List<Employee> = team.filterNot { it.id == id }
 
+    /**
+     * Person in der Liste eine Stelle nach oben ([up]) oder unten schieben. So stehen die Zeilen im Plan
+     * in der Reihenfolge wie auf dem Papier. Am Rand oder bei unbekannter ID bleibt alles, wie es ist.
+     */
+    fun move(team: List<Employee>, id: String, up: Boolean): List<Employee> {
+        val index = team.indexOfFirst { it.id == id }
+        if (index < 0) return team
+        val other = if (up) index - 1 else index + 1
+        if (other !in team.indices) return team
+        return team.toMutableList().also { java.util.Collections.swap(it, index, other) }
+    }
+
     fun shortDay(day: DayOfWeek): String = Weekdays.short(day)
 
     /** Kurze Merkmale für die Teamliste, z. B. "Nur spät", "Nie Mo, Di", "Aushilfe". */

@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -170,8 +171,21 @@ private fun TeamListe(zustand: TeamZustand, store: TeamStore, oeffnen: (String) 
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(zustand.team, key = { it.id }) { e ->
-                    MitarbeiterZeile(e, enabled = zustand.bearbeitbar) { oeffnen(e.id) }
+                item {
+                    Text(
+                        "Die Reihenfolge gilt auch im Plan. Mit ▲ ▼ verschieben.",
+                        fontSize = 13.sp,
+                        color = TextLeise,
+                    )
+                }
+                itemsIndexed(zustand.team, key = { _, e -> e.id }) { i, e ->
+                    MitarbeiterZeile(
+                        e,
+                        enabled = zustand.bearbeitbar,
+                        erste = i == 0,
+                        letzte = i == zustand.team.lastIndex,
+                        verschieben = { hoch -> store.verschieben(e.id, hoch) },
+                    ) { oeffnen(e.id) }
                 }
             }
         }
@@ -224,7 +238,14 @@ private fun LeeresTeam(bearbeitbar: Boolean, neu: () -> Unit, beispiel: () -> Un
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun MitarbeiterZeile(e: Employee, enabled: Boolean, onClick: () -> Unit) {
+private fun MitarbeiterZeile(
+    e: Employee,
+    enabled: Boolean,
+    erste: Boolean = true,
+    letzte: Boolean = true,
+    verschieben: (Boolean) -> Unit = {},
+    onClick: () -> Unit,
+) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -269,7 +290,25 @@ private fun MitarbeiterZeile(e: Employee, enabled: Boolean, onClick: () -> Unit)
                 }
             }
         }
-        Text("›", fontSize = 22.sp, color = TextLeise)
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Pfeil("▲", "${e.name} nach oben", enabled && !erste, "hoch-${e.id}") { verschieben(true) }
+            Pfeil("▼", "${e.name} nach unten", enabled && !letzte, "runter-${e.id}") { verschieben(false) }
+        }
+    }
+}
+
+@Composable
+private fun Pfeil(text: String, beschreibung: String, enabled: Boolean, tag: String, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(width = 48.dp, height = 40.dp)
+            .background(if (enabled) Chip else Color.Transparent, RoundedCornerShape(8.dp))
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = beschreibung }
+            .testTag(tag),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, fontSize = 16.sp, color = if (enabled) Schrift else Rand)
     }
 }
 
