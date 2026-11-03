@@ -1,0 +1,25 @@
+# Gradle / Android Studio
+.gradle/
+build/
+/local.properties
+/.idea/
+*.iml
+.DS_Store
+/captures
+.externalNativeBuild/
+.cxx/
+
+# Signierschlüssel und Geheimnisse gehören NIE ins Repo
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+
+# Echte Daten, Exporte und Fotos gehören NIE ins Repo
+*.pdf
+
+# Projekt-Dokumente (Regeln, Notizen, KI-Hinweise) liegen bewusst NICHT im Repo
+docs/
+CLAUDE.md
+backups/
+private/
