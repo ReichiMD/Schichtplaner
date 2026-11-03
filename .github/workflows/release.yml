@@ -5,9 +5,17 @@ name: Release
 #
 # versionCode = Major * 10000 + Minor * 100 + Patch (v1.2.3 -> 10203). So steigt er immer mit der
 # Version und hängt nicht vom Namen dieser Datei ab. Minor und Patch dürfen höchstens 99 sein.
+#
+# Alternativ ohne Tag: Actions -> Release -> "Run workflow" mit Version (z. B. 0.1.0).
+# Dann setzt der Workflow den Tag selbst. Läuft nur auf main.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version ohne v, z. B. 0.1.0"
+        required: true
 
 permissions:
   contents: write
@@ -28,13 +36,25 @@ jobs:
       - name: Version aus dem Tag lesen
         id: version
         shell: bash
+        env:
+          EINGABE: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          if [[ ! "$GITHUB_REF_NAME" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-            echo "Tag '$GITHUB_REF_NAME' hat nicht das Format vX.Y.Z"; exit 1
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            if [ "$GITHUB_REF_NAME" != "main" ]; then echo "Releases nur von main"; exit 1; fi
+            TAG="v$EINGABE"
+            if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+              echo "Tag $TAG gibt es schon"; exit 1
+            fi
+          else
+            TAG="$GITHUB_REF_NAME"
+          fi
+          if [[ ! "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "Version '$TAG' hat nicht das Format vX.Y.Z"; exit 1
           fi
           MAJOR=${BASH_REMATCH[1]}; MINOR=${BASH_REMATCH[2]}; PATCH=${BASH_REMATCH[3]}
           if (( MINOR > 99 || PATCH > 99 )); then echo "Minor und Patch dürfen höchstens 99 sein"; exit 1; fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "name=$MAJOR.$MINOR.$PATCH" >> "$GITHUB_OUTPUT"
           echo "code=$(( MAJOR * 10000 + MINOR * 100 + PATCH ))" >> "$GITHUB_OUTPUT"
 
@@ -81,7 +101,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" "schichtplaner-${{ steps.version.outputs.name }}.apk" \
+          gh release create "${{ steps.version.outputs.tag }}" "schichtplaner-${{ steps.version.outputs.name }}.apk" \
+            --target "$GITHUB_SHA" \
             --title "Schichtplan ${{ steps.version.outputs.name }}" \
             --generate-notes
 
