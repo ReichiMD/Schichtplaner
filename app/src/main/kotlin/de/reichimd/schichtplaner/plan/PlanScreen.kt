@@ -145,8 +145,14 @@ internal class PlanViewModel : ViewModel() {
         rechnung = Rechnung.Rechnet(woche)
         viewModelScope.launch {
             rechnung = try {
+                val teamStand = teamStore.zustand.first { !it.laedt }
+                // Teamliste nicht lesbar: nicht rechnen, sonst würden echte Einträge als "unbekannt" überschrieben.
+                if (!teamStand.bearbeitbar) {
+                    rechnung = Rechnung.Fehler(woche, "Die Teamliste ist gerade nicht lesbar. Bitte im Reiter „Team“ nachsehen.")
+                    return@launch
+                }
                 // Mit dem gespeicherten Team, solange noch keins angelegt ist mit dem erfundenen Beispiel.
-                val team = teamStore.zustand.first { !it.laedt }.team.ifEmpty { DemoData.team }
+                val team = teamStand.team.ifEmpty { DemoData.team }
                 val laden = ladenStore.zustand.first { !it.laedt }.laden
                 val wuensche = wuenscheStore.zustand.first { !it.laedt }.eintraege
                 val vorher = planStore.zustand.first { !it.laedt }.plan
@@ -157,8 +163,13 @@ internal class PlanViewModel : ViewModel() {
                 }
                 val millis = System.currentTimeMillis() - start
                 val ids = team.map { it.id }.toSet()
+                // Team, Laden oder Kalender während der Rechnung geändert (z. B. jemand ausgeschieden): nicht eintragen.
+                val geaendert = teamStore.zustand.value.team != teamStand.team ||
+                    ladenStore.zustand.value.laden != laden ||
+                    wuenscheStore.zustand.value.eintraege != wuensche
                 when {
                     !ergebnis.solved -> Rechnung.NichtGefunden(woche)
+                    geaendert -> Rechnung.Fehler(woche, "Team, Laden oder Wünsche wurden inzwischen geändert. Bitte noch einmal „Rest ausfüllen“.")
                     // Nur eintragen, wenn sich der Plan inzwischen nicht geändert hat (z. B. Sicherung eingespielt).
                     !planStore.wennUnveraendert(vorher) { p ->
                         YearPlans.withWeek(p, YearPlans.applyFill(YearPlans.week(p, woche, laden), ergebnis, ids))
@@ -215,10 +226,11 @@ internal fun PlanScreen(
     val abwesend = wuensche.eintraege
     val plan = gespeichert.plan
     val shop = laden.laden
-    val wochen = remember(heute) { YearPlans.range(heute) }
+    // Einmal je Bildschirm festgelegt: Bleibt die App über Silvester offen, verrutscht sonst die Seite.
+    val wochen = remember { YearPlans.range(heute) }
     val startSeite = remember(wochen) { wochen.indexOf(YearPlans.monday(heute)).coerceAtLeast(0) }
     val rechnet = rechnung is Rechnung.Rechnet
-    val aenderbar = gespeichert.bearbeitbar && !rechnet
+    val aenderbar = gespeichert.bearbeitbar && team.bearbeitbar && !rechnet
 
     val pager = rememberPagerState(
         initialPage = vm.montag?.let { wochen.indexOf(it) }?.takeIf { it >= 0 } ?: startSeite,
@@ -422,7 +434,8 @@ internal fun PlanScreen(
                 leute = alle,
                 abwesend = abwesend,
                 hinweise = hinweise,
-                uebernehmen = { stelle -> aendern(tag) { PlanEdit.assign(it, stelle, person.id, alleIds) } },
+                // Ausgeschiedene behalten ihre alten Schichten, bekommen aber keine neuen.
+                uebernehmen = { stelle -> if (!person.archived) aendern(tag) { PlanEdit.assign(it, stelle, person.id, alleIds) } },
                 freiGeben = { aendern(tag) { PlanEdit.free(it, person.id, tag) } },
                 zeiten = { stelle, beginn, ende ->
                     PlanEdit.timeProblem(beginn, ende) ?: run {

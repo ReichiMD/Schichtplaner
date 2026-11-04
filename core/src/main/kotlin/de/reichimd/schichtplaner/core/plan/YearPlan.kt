@@ -51,9 +51,12 @@ object YearPlans {
 
     fun monday(date: LocalDate): LocalDate = date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
 
-    /** Durch welche Wochen man wischen kann: ab der ersten Woche des laufenden Jahres bis Ende des nächsten Jahres. */
+    /**
+     * Durch welche Wochen man wischen kann: ab der ersten Woche des Vorjahres (im Januar noch an den
+     * Dezember kommen) bis Ende des nächsten Jahres.
+     */
     fun range(today: LocalDate): List<LocalDate> {
-        val first = monday(LocalDate.of(today.year, 1, 1))
+        val first = monday(LocalDate.of(today.year - 1, 1, 1))
         val last = monday(LocalDate.of(today.year + 1, 12, 31))
         return generateSequence(first) { it.plusWeeks(1) }.takeWhile { !it.isAfter(last) }.toList()
     }
@@ -124,7 +127,8 @@ object YearPlans {
 
     /**
      * Auftrag an den Planer für "Rest ausfüllen": Alle schon eingetragenen Schichten der Woche bleiben fest,
-     * nur offene werden besetzt. Die Woche davor und danach (soweit geplant) zählt für Ruhezeit und Tage am Stück.
+     * nur offene werden besetzt. Die Woche davor zählt für Ruhezeit und Tage am Stück, die Woche danach
+     * (soweit geplant) nur für die Ruhezeit.
      * [employees] sind alle, Ausgeschiedene werden nicht neu eingeplant.
      */
     fun fillRequest(

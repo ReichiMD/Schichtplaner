@@ -196,7 +196,8 @@ object Planner {
         }
 
         // Monatsstunden anteilig auf den Zeitraum umgerechnet, in Viertelstunden.
-        val regulars = employees.indices.filter { !employees[it].isBackup }
+        // Ausgeschiedene nicht: Sie bekommen nichts Neues und würden sonst den Wochenend-Anteil der anderen drücken.
+        val regulars = employees.indices.filter { !employees[it].isBackup && !employees[it].archived }
         // Urlaubs- und Krankheitstage verringern das Soll anteilig, sonst würde das volle Soll
         // in die restlichen Tage gepresst.
         val absentDays = blocked.groupingBy { it.first }.eachCount()

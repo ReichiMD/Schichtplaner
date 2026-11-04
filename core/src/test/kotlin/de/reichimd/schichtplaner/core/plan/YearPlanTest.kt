@@ -33,9 +33,9 @@ class YearPlanTest {
     private val ids = team.map { it.id }.toSet()
 
     @Test
-    fun wischbereichVomLaufendenBisEndeNaechstesJahr() {
+    fun wischbereichVomVorjahrBisEndeNaechstesJahr() {
         val wochen = YearPlans.range(LocalDate.of(2026, 11, 4))
-        assertEquals(LocalDate.of(2025, 12, 29), wochen.first()) // Woche mit dem 1.1.2026
+        assertEquals(LocalDate.of(2024, 12, 30), wochen.first()) // Woche mit dem 1.1.2025
         assertEquals(LocalDate.of(2027, 12, 27), wochen.last()) // Woche mit dem 31.12.2027
         assertTrue(wochen.all { it.dayOfWeek == java.time.DayOfWeek.MONDAY })
         assertTrue(wochen.zipWithNext().all { (a, b) -> a.plusWeeks(1) == b })
@@ -163,6 +163,24 @@ class YearPlanTest {
 
         assertTrue(YearPlans.rows(alt, gefuellt).any { it.id == "f" })
         assertFalse(YearPlans.rows(alt, YearPlans.week(plan, mo.plusWeeks(1), shop)).any { it.id == "f" })
+    }
+
+    @Test
+    fun handeintraegeGegenDieRegelnBleibenUndDerRestWirdTrotzdemGefuellt() {
+        // Ben von Hand an allen 7 Tagen (zu viele am Stück), Mo spät und Di früh (zu wenig Ruhe),
+        // dazu Urlaub am Mittwoch. Der Planer muss das so stehen lassen und den Rest füllen.
+        var w = YearPlans.week(YearPlan.EMPTY, mo, shop)
+        w = PlanEdit.assign(w, w.slotsOn(mo).last().key, "b")
+        for (d in 1L..6L) w = PlanEdit.assign(w, w.slotsOn(mo.plusDays(d)).first().key, "b")
+        val plan = YearPlans.withWeek(YearPlan.EMPTY, w)
+        val urlaub = listOf(Absence("b", mo.plusDays(2), AbsenceType.VACATION))
+
+        val request = YearPlans.fillRequest(plan, mo, shop, team, urlaub)
+        val result = Planner.plan(request, timeLimitMillis = 10_000)
+        assertTrue(result.solved)
+        val gefuellt = YearPlans.applyFill(YearPlans.week(plan, mo, shop), result, ids)
+        assertEquals(w.slots.filter { it.employeeId == "b" }.map { it.key }, gefuellt.slots.filter { it.employeeId == "b" }.map { it.key })
+        assertTrue(gefuellt.slots.count { it.employeeId == null } < w.slots.count { it.employeeId == null })
     }
 
     @Test
