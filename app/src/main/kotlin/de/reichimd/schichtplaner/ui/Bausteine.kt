@@ -54,8 +54,9 @@ internal val FehlerHell = Color(0xFFFDECEA)
 
 // Wünsche-Kalender: Arten unterscheiden sich auch in der Helligkeit, nicht nur im Farbton.
 internal val Urlaub = Color(0xFF6E4FA0)
-internal val FreiWunsch = Color(0xFF2F6CB0)
-internal val FreiWunschHell = Color(0xFFDCE9F7)
+// Grün, damit es sich vom hellblauen Spätdienst im Plan abhebt.
+internal val FreiWunsch = Color(0xFF2E7D32)
+internal val FreiWunschHell = Color(0xFFDDEFD8)
 internal val Krank = Color(0xFFA23B2E)
 internal val KrankHell = Color(0xFFF6DEDA)
 

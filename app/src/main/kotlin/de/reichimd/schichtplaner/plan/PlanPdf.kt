@@ -95,6 +95,9 @@ internal object PlanPdf {
     private const val SPAET = 0xFFE6EFF9.toInt()
     private const val ABSCHNITT = 0xFFF1ECE4.toInt()
     private const val ROT = 0xFFB3261E.toInt()
+    // Frei-Wunsch: grün wie im Wünsche-Kalender (auch schwarz-weiß gedruckt noch als grauer Kasten erkennbar).
+    private const val WUNSCH = 0xFFDDEFD8.toInt()
+    private const val WUNSCH_SCHRIFT = 0xFF2E7D32.toInt()
 
     private val DATUM = DateTimeFormatter.ofPattern("dd.MM.yyyy")
 
@@ -220,7 +223,7 @@ internal object PlanPdf {
         c.drawRect(RectF(RAND, tabelleOben, BREITE - RAND, y), linie)
 
         val klein = stift(7.5f, farbe = GRAU)
-        c.drawText("P = Pause · U = Urlaub · K = krank · Fr = frei · Std. = bezahlte Stunden", RAND, HOEHE - RAND + 6f, klein)
+        c.drawText("P = Pause · U = Urlaub · K = krank · Fr = frei (grün: Frei-Wunsch) · Std. = bezahlte Stunden", RAND, HOEHE - RAND + 6f, klein)
         c.drawText(fuss, BREITE - RAND - klein.measureText(fuss), HOEHE - RAND + 6f, klein)
     }
 
@@ -229,12 +232,19 @@ internal object PlanPdf {
             !z.inPlan -> AUSSERHALB
             z.kind == ShiftKind.EARLY -> FRUEH
             z.kind == ShiftKind.LATE -> SPAET
+            z.wish -> WUNSCH
             else -> null
         }
         hintergrund?.let { c.drawRect(x + 0.5f, y + 0.5f, x + breite - 0.5f, y + hoehe - 0.5f, flaeche(it)) }
         if (z.bottom.isEmpty()) {
-            // Nur ein Kürzel (U, K, Fr): groß in die Mitte.
-            mitte(c, z.top, stift(oben + 1f, fett = true), x, breite, y + hoehe / 2f + oben / 2.8f)
+            // Nur ein Kürzel (U, K, Fr): groß in die Mitte. Normales "Fr" leise, damit Schichten und U/K auffallen.
+            val leise = z.top == PlanPrint.FREE && !z.wish
+            val farbe = when {
+                z.wish -> WUNSCH_SCHRIFT
+                leise -> GRAU
+                else -> SCHWARZ
+            }
+            mitte(c, z.top, stift(oben + 1f, fett = !leise, farbe = farbe), x, breite, y + hoehe / 2f + oben / 2.8f)
         } else {
             mitte(c, z.top, stift(oben, fett = true), x, breite, y + hoehe * 0.45f)
             mitte(c, z.bottom, stift(unten, farbe = GRAU), x, breite, y + hoehe * 0.45f + unten + 2f)
