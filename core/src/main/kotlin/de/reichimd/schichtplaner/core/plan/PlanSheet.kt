@@ -4,9 +4,20 @@ import de.reichimd.schichtplaner.core.Absence
 import de.reichimd.schichtplaner.core.AbsenceType
 import de.reichimd.schichtplaner.core.Employee
 import de.reichimd.schichtplaner.core.Planner
+import de.reichimd.schichtplaner.core.shop.ShopSettings
+import de.reichimd.schichtplaner.core.shop.ShortDay
 import java.time.LocalDate
 import java.time.LocalDateTime
 import kotlin.math.roundToLong
+
+/** Besonderer Tag im Plan: Feiertag (freie Tage heißen dann "FF") oder kürzerer Tag wie Heiligabend. */
+data class DayNote(
+    /** z. B. "Reformationstag" oder "Heiligabend". */
+    val label: String,
+    val holiday: Boolean,
+    /** Der Laden ist an diesem Tag zu (nur bei Feiertagen). */
+    val closed: Boolean = false,
+)
 
 /**
  * Zahlen und Texte für das Wochenblatt wie auf dem Papier:
@@ -65,6 +76,21 @@ object PlanSheet {
     /** Offene Schichten eines Tages: niemand eingeteilt, oder die Person ist nicht mehr im Team. */
     fun openOn(plan: ShiftPlan, date: LocalDate, teamIds: Set<String>): List<PlanSlot> =
         plan.slotsOn(date).filter { it.employeeId == null || it.employeeId !in teamIds }
+
+    /** Feiertage und kürzere Tage von [first] bis [last]. Kürzere Tage nur, wenn sie eingestellt sind. */
+    fun dayNotes(shop: ShopSettings, first: LocalDate, last: LocalDate): Map<LocalDate, DayNote> {
+        val notes = mutableMapOf<LocalDate, DayNote>()
+        for ((date, h) in shop.holidays(first, last)) {
+            notes[date] = DayNote(h.name, holiday = true, closed = shop.isClosedHoliday(h))
+        }
+        var d = first
+        while (!d.isAfter(last)) {
+            val short = ShortDay.on(d)
+            if (short != null && short in shop.shortDays && d !in notes) notes[d] = DayNote(short.label, holiday = false)
+            d = d.plusDays(1)
+        }
+        return notes
+    }
 
     fun openCount(plan: ShiftPlan, teamIds: Set<String>): Int =
         plan.slots.count { it.employeeId == null || it.employeeId !in teamIds }

@@ -61,9 +61,9 @@ object YearPlans {
         return generateSequence(first) { it.plusWeeks(1) }.takeWhile { !it.isAfter(last) }.toList()
     }
 
-    /** Offene Schichten einer Woche aus den Vorlagen des Ladens (Feiertage noch wie normale Tage). */
+    /** Offene Schichten einer Woche aus den Vorlagen des Ladens, mit Feiertagen und kürzeren Tagen. */
     fun templateSlots(monday: LocalDate, shop: ShopSettings): List<PlanSlot> =
-        ShiftCalendar.shifts(monday, 7, shop.toConfig()).map {
+        ShiftCalendar.shifts(monday, 7, shop.toConfig(monday, monday.plusDays(6))).map {
             PlanSlot(SlotKey(it.date, it.template.id, it.slot), it.template.name, it.kind, it.start, it.end, null)
         }
 
@@ -155,7 +155,7 @@ object YearPlans {
         return PlanningRequest(
             firstDay = monday,
             days = 7,
-            shop = shop.toConfig(),
+            shop = shop.toConfig(monday, monday.plusDays(6)),
             employees = employees,
             absences = absences.filter { !it.date.isBefore(monday) && !it.date.isAfter(monday.plusDays(6)) },
             rules = rules,

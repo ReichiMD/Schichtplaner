@@ -24,23 +24,46 @@ data class DayHours(val open: LocalTime, val close: LocalTime)
 /**
  * Alles, was die Filialleitung zum Laden einstellt. Fehlt ein Wochentag in [openingHours], wird dann nicht
  * gearbeitet. [openingHours] ist die Arbeitszeit je Tag (Name aus dem Speicherformat).
- * Feiertage: vorerst wie Sonntag (Arbeitszeit und Schichten), bis die echten Zeiten geklärt sind.
  */
 data class ShopSettings(
     val openingHours: Map<DayOfWeek, DayHours>,
     val templates: List<ShiftTemplate>,
     /** Planungszeitraum in Wochen: 2 oder 4. */
     val planWeeks: Int = 2,
+    /** Nach diesem Bundesland richten sich die Feiertage. */
+    val state: FederalState = FederalState.ST,
+    /** Arbeitszeit an Feiertagen, null = an Feiertagen zu. Welche Schichten: [ShiftTemplate.onHolidays]. */
+    val holidayHours: DayHours? = null,
+    /** Feiertage, an denen der Laden trotzdem zu ist. */
+    val closedHolidays: Set<HolidayId> = emptySet(),
+    /** Kürzere Tage mit eigener Arbeitszeit. Fehlt ein Tag, wird wie an seinem Wochentag gearbeitet. */
+    val shortDays: Map<ShortDay, DayHours> = emptyMap(),
 ) {
     val planDays: Int get() = planWeeks * 7
 
-    /** Für den Planer. Nur mit gültigen Einstellungen aufrufen (siehe [Shop.problems]). */
-    fun toConfig(holidays: Set<LocalDate> = emptySet()): ShopConfig = ShopConfig(
-        openingHours = openingHours.mapValues { (_, h) -> OpeningHours(h.open, h.close) },
-        holidayHours = openingHours[DayOfWeek.SUNDAY]?.let { OpeningHours(it.open, it.close) },
-        holidays = holidays,
-        templates = templates.map { it.copy(onHolidays = DayOfWeek.SUNDAY in it.weekdays) },
-    )
+    /** Feiertage von [first] bis [last], auch die, an denen der Laden zu ist. */
+    fun holidays(first: LocalDate, last: LocalDate): Map<LocalDate, Holiday> = Holidays.between(first, last, state)
+
+    /** Feiertag an diesem Tag, an dem der Laden zu ist? */
+    fun isClosedHoliday(holiday: Holiday): Boolean = holidayHours == null || holiday.id in closedHolidays
+
+    /**
+     * Für den Planer, mit den Feiertagen und kürzeren Tagen von [first] bis [last].
+     * Nur mit gültigen Einstellungen aufrufen (siehe [Shop.problems]).
+     */
+    fun toConfig(first: LocalDate, last: LocalDate): ShopConfig {
+        val holidays = holidays(first, last)
+        return ShopConfig(
+            openingHours = openingHours.mapValues { (_, h) -> OpeningHours(h.open, h.close) },
+            holidayHours = holidayHours?.takeIf { it.close.isAfter(it.open) }?.let { OpeningHours(it.open, it.close) },
+            holidays = holidays.keys,
+            templates = templates,
+            closedDays = holidays.values.filter { isClosedHoliday(it) }.map { it.date }.toSet(),
+            shortDays = (first.year..last.year).flatMap { year ->
+                shortDays.filterValues { it.close.isAfter(it.open) }.map { (d, h) -> d.dateIn(year) to OpeningHours(h.open, h.close) }
+            }.filter { (d, _) -> !d.isBefore(first) && !d.isAfter(last) }.toMap(),
+        )
+    }
 }
 
 /** Wo ein Problem in den Laden-Einstellungen angezeigt wird. */
@@ -50,6 +73,9 @@ sealed interface ShopField {
     /** Betrifft die Schichten insgesamt (z. B. zu viele). */
     data object Templates : ShopField
     data object Weeks : ShopField
+    /** Arbeitszeit an Feiertagen. */
+    data object HolidayHours : ShopField
+    data class Short(val day: ShortDay) : ShopField
 }
 
 enum class TemplatePart { NAME, START, END, DAYS, STAFF }
@@ -87,14 +113,27 @@ object Shop {
         templates = listOf(
             ShiftTemplate("f1", "Früh 1", ShiftKind.EARLY, ShiftStart.At(t(4, 30)), ShiftEnd.At(t(11, 30))),
             ShiftTemplate("f2", "Früh 2", ShiftKind.EARLY, ShiftStart.At(t(5, 30)), ShiftEnd.At(t(12, 30))),
-            ShiftTemplate("sp", "Spät", ShiftKind.LATE, ShiftStart.At(t(12, 30)), ShiftEnd.AfterClose(0), weekdays = MO_SA),
+            ShiftTemplate(
+                "sp", "Spät", ShiftKind.LATE, ShiftStart.At(t(12, 30)), ShiftEnd.AfterClose(0),
+                weekdays = MO_SA, onHolidays = false,
+            ),
             ShiftTemplate(
                 "sp-so", "Spät So", ShiftKind.LATE, ShiftStart.At(t(12)), ShiftEnd.AfterClose(0),
                 weekdays = setOf(DayOfWeek.SUNDAY),
             ),
         ),
         planWeeks = 2,
+        state = FederalState.ST,
+        holidayHours = DayHours(t(4, 30), t(17, 30)),
+        shortDays = SHORT_DAYS_DEFAULT,
     )
+
+    /** Vorgabe für Heiligabend und Silvester: bis 14:30 (Ladenschluss etwa 14 Uhr). */
+    val SHORT_DAYS_DEFAULT: Map<ShortDay, DayHours>
+        get() = ShortDay.entries.associateWith { DayHours(t(4, 30), t(14, 30)) }
+
+    /** Bezeichnung für Meldungen bei Feiertagen. */
+    const val HOLIDAY_LABEL = "Feiertag"
 
     fun cleanName(raw: String): String = raw.trim().replace(Regex("\\s+"), " ")
 
@@ -121,6 +160,13 @@ object Shop {
             if (!h.close.isAfter(h.open)) {
                 result += Problem(ShopField.Day(day), "Das Ende muss nach dem Beginn liegen.")
             }
+        }
+
+        settings.holidayHours?.let { h ->
+            if (!h.close.isAfter(h.open)) result += Problem(ShopField.HolidayHours, "Das Ende muss nach dem Beginn liegen.")
+        }
+        for ((day, h) in settings.shortDays.toSortedMap()) {
+            if (!h.close.isAfter(h.open)) result += Problem(ShopField.Short(day), "Das Ende muss nach dem Beginn liegen.")
         }
 
         if (settings.planWeeks !in PLAN_WEEKS) {
@@ -155,7 +201,7 @@ object Shop {
                 add(TemplatePart.NAME, "„$name“ gibt es schon. Bitte einen anderen Namen wählen.")
         }
 
-        if (template.weekdays.isEmpty()) add(TemplatePart.DAYS, "Bitte mindestens einen Tag wählen.")
+        if (template.weekdays.isEmpty() && !template.onHolidays) add(TemplatePart.DAYS, "Bitte mindestens einen Tag wählen.")
         if (template.staff !in 1..MAX_STAFF) add(TemplatePart.STAFF, "Pro Schicht 1 bis $MAX_STAFF Personen.")
 
         when (val s = template.start) {
@@ -174,25 +220,28 @@ object Shop {
             return result
         }
 
-        // Uhrzeiten an jedem Tag prüfen, an dem die Schicht gebraucht wird und gearbeitet wird.
+        // Uhrzeiten an jedem Tag prüfen, an dem die Schicht gebraucht wird und gearbeitet wird (auch Feiertage).
         val reference = LocalDate.of(2024, 1, 1) // ein Montag; nur zum Rechnen
-        val startBeforeMidnight = mutableListOf<DayOfWeek>()
-        val endAfterMidnight = mutableListOf<DayOfWeek>()
-        val endBeforeStart = mutableListOf<DayOfWeek>()
-        val tooLong = mutableListOf<DayOfWeek>()
-        for (day in template.weekdays.sorted()) {
-            val h = settings.openingHours[day] ?: continue
+        val startBeforeMidnight = mutableListOf<String>()
+        val endAfterMidnight = mutableListOf<String>()
+        val endBeforeStart = mutableListOf<String>()
+        val tooLong = mutableListOf<String>()
+        val checks = template.weekdays.sorted().mapNotNull { day ->
+            settings.openingHours[day]?.let { Triple(Weekdays.short(day), reference.plusDays(day.value - 1L), it) }
+        } + listOfNotNull(
+            settings.holidayHours?.takeIf { template.onHolidays }?.let { Triple(HOLIDAY_LABEL, reference, it) },
+        )
+        for ((label, date, h) in checks) {
             if (!h.close.isAfter(h.open)) continue // steht schon am Tag selbst
-            val date = reference.plusDays(day.value - 1L)
             val (start, end) = ShiftCalendar.times(template, date, OpeningHours(h.open, h.close))
             when {
-                start.toLocalDate() != date -> startBeforeMidnight += day
-                !end.isBefore(date.plusDays(1).atStartOfDay()) -> endAfterMidnight += day
-                !end.isAfter(start) -> endBeforeStart += day
-                Duration.between(start, end) > Duration.ofHours(MAX_SHIFT_HOURS) -> tooLong += day
+                start.toLocalDate() != date -> startBeforeMidnight += label
+                !end.isBefore(date.plusDays(1).atStartOfDay()) -> endAfterMidnight += label
+                !end.isAfter(start) -> endBeforeStart += label
+                Duration.between(start, end) > Duration.ofHours(MAX_SHIFT_HOURS) -> tooLong += label
             }
         }
-        fun days(list: List<DayOfWeek>) = list.joinToString(", ") { Weekdays.short(it) }
+        fun days(list: List<String>) = list.joinToString(", ")
         if (startBeforeMidnight.isNotEmpty()) {
             add(TemplatePart.START, "Am ${days(startBeforeMidnight)} läge der Beginn vor Mitternacht. Bitte früher oder fest einstellen.")
         }
@@ -223,8 +272,13 @@ object Shop {
         if (withoutShift.isNotEmpty()) {
             result += "Am ${withoutShift.joinToString(", ") { Weekdays.short(it) }} ist Arbeitszeit, aber keine Schicht vorgesehen."
         }
+        if (settings.holidayHours != null && settings.templates.none { it.onHolidays }) {
+            result += "An Feiertagen ist Arbeitszeit, aber keine Schicht vorgesehen."
+        }
         for (template in settings.templates) {
-            if (template.weekdays.isNotEmpty() && template.weekdays.none { it in settings.openingHours }) {
+            val anWochentagen = template.weekdays.any { it in settings.openingHours }
+            val anFeiertagen = template.onHolidays && settings.holidayHours != null
+            if (!anWochentagen && !anFeiertagen) {
                 result += "„${template.name}“ fällt nur auf Tage ohne Arbeitszeit."
             }
         }
@@ -287,9 +341,10 @@ object Shop {
 
     /**
      * Wann die Schicht an welchen Tagen konkret liegt, z. B. ["Mo–Fr 12:30–18:30", "Sa 12:30–16:30"].
-     * Tage, an denen der Laden zu ist oder die Zeiten ungültig sind, fehlen.
+     * Tage, an denen der Laden zu ist oder die Zeiten ungültig sind, fehlen. Mit [holidayHours] kommt
+     * "Feiertag 04:30–11:30" dazu, wenn die Schicht auch an Feiertagen gilt.
      */
-    fun preview(template: ShiftTemplate, openingHours: Map<DayOfWeek, DayHours>): List<String> {
+    fun preview(template: ShiftTemplate, openingHours: Map<DayOfWeek, DayHours>, holidayHours: DayHours? = null): List<String> {
         val reference = LocalDate.of(2024, 1, 1)
         val byTimes = linkedMapOf<String, MutableList<DayOfWeek>>()
         for (day in template.weekdays.sorted()) {
@@ -300,7 +355,27 @@ object Shop {
             if (start.toLocalDate() != date || end.toLocalDate() != date || !end.isAfter(start)) continue
             byTimes.getOrPut("${format(start.toLocalTime())}–${format(end.toLocalTime())}") { mutableListOf() } += day
         }
-        return byTimes.map { (times, days) -> "${Weekdays.describe(days)} $times" }
+        val result = byTimes.map { (times, days) -> "${Weekdays.describe(days)} $times" }
+        val feiertag = holidayHours?.takeIf { template.onHolidays && it.close.isAfter(it.open) }?.let { h ->
+            val (start, end) = ShiftCalendar.times(template, reference, OpeningHours(h.open, h.close))
+            if (start.toLocalDate() != reference || end.toLocalDate() != reference || !end.isAfter(start)) null
+            else "$HOLIDAY_LABEL ${format(start.toLocalTime())}–${format(end.toLocalTime())}"
+        }
+        return result + listOfNotNull(feiertag)
+    }
+
+    /**
+     * Wie die Schicht an einem kürzeren Tag liegt (z. B. Heiligabend), oder null, wenn sie dann wegfällt.
+     * Gleiche Regel wie im Planer: endet spätestens zum Feierabend.
+     */
+    fun shortDayTimes(template: ShiftTemplate, hours: DayHours): String? {
+        if (!hours.close.isAfter(hours.open)) return null
+        val date = LocalDate.of(2024, 1, 1)
+        var (start, end) = ShiftCalendar.times(template, date, OpeningHours(hours.open, hours.close))
+        val close = date.atTime(hours.close)
+        if (end.isAfter(close)) end = close
+        if (start.toLocalDate() != date || !end.isAfter(start)) return null
+        return "${format(start.toLocalTime())}–${format(end.toLocalTime())}"
     }
 
     /** Fügt eine neue Schicht hinten an oder ersetzt die mit gleicher ID an ihrer Stelle. */

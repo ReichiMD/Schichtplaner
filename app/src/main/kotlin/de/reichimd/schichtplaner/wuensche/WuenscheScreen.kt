@@ -57,6 +57,9 @@ import de.reichimd.schichtplaner.core.Weekdays
 import de.reichimd.schichtplaner.core.wishes.Wishes
 import de.reichimd.schichtplaner.core.team.Team
 import de.reichimd.schichtplaner.team.TeamStore
+import de.reichimd.schichtplaner.ui.Fehler
+import de.reichimd.schichtplaner.laden.laden
+import de.reichimd.schichtplaner.laden.LadenStore
 import de.reichimd.schichtplaner.team.team
 import de.reichimd.schichtplaner.ui.Akzent
 import de.reichimd.schichtplaner.ui.Chip
@@ -111,10 +114,19 @@ private fun knopfFarbe(art: AbsenceType): Color = when (art) {
 internal fun WuenscheBereich(
     teamStore: TeamStore = TeamStore.get(LocalContext.current),
     store: WuenscheStore = WuenscheStore.get(LocalContext.current),
+    ladenStore: LadenStore = LadenStore.get(LocalContext.current),
     heute: LocalDate = LocalDate.now(),
 ) {
     val team by teamStore.zustand.collectAsState()
     val zustand by store.zustand.collectAsState()
+    val laden by ladenStore.zustand.collectAsState()
+    // Feiertage im ganzen Blätterbereich, nur zur Anzeige ("FT").
+    val shop = laden.laden
+    val feiertage = remember(shop.state, heute) {
+        val von = YearMonth.from(heute).minusMonths(Wishes.MONTHS_BACK.toLong()).atDay(1)
+        val bis = YearMonth.from(heute).plusMonths(Wishes.MONTHS_AHEAD.toLong()).atEndOfMonth()
+        shop.holidays(von, bis).mapValues { it.value.name }
+    }
 
     Column(
         Modifier
@@ -138,13 +150,19 @@ internal fun WuenscheBereich(
                     "Urlaub und Frei-Wünsche eintragen.",
             )
             // Ausgeschiedene behalten ihre Einträge, stehen aber nicht mehr zur Auswahl.
-            else -> Kalender(Team.active(team.team), zustand, store, heute)
+            else -> Kalender(Team.active(team.team), zustand, store, heute, feiertage)
         }
     }
 }
 
 @Composable
-private fun Kalender(team: List<Employee>, zustand: WuenscheZustand, store: WuenscheStore, heute: LocalDate) {
+private fun Kalender(
+    team: List<Employee>,
+    zustand: WuenscheZustand,
+    store: WuenscheStore,
+    heute: LocalDate,
+    feiertage: Map<LocalDate, String>,
+) {
     var gewaehlteId by rememberSaveable { mutableStateOf<String?>(null) }
     // Gelöschte oder noch nicht gewählte Person: die erste im Team.
     val person = team.firstOrNull { it.id == gewaehlteId } ?: team.first()
@@ -217,6 +235,7 @@ private fun Kalender(team: List<Employee>, zustand: WuenscheZustand, store: Wuen
             monat = m,
             eintraege = imMonat,
             gesperrt = person.blockedWeekdays,
+            feiertage = feiertage,
             heute = heute,
             hoehe = zellenHoehe,
             bearbeitbar = zustand.bearbeitbar,
@@ -346,6 +365,7 @@ private fun MonatsRaster(
     monat: YearMonth,
     eintraege: Map<LocalDate, AbsenceType>,
     gesperrt: Set<DayOfWeek>,
+    feiertage: Map<LocalDate, String>,
     heute: LocalDate,
     hoehe: Dp,
     bearbeitbar: Boolean,
@@ -363,6 +383,7 @@ private fun MonatsRaster(
                             tag = tag,
                             art = eintraege[tag],
                             gesperrt = tag.dayOfWeek in gesperrt,
+                            feiertag = feiertage[tag],
                             istHeute = tag == heute,
                             bearbeitbar = bearbeitbar,
                             modifier = Modifier.weight(1f).height(hoehe),
@@ -379,6 +400,8 @@ private fun TagZelle(
     tag: LocalDate,
     art: AbsenceType?,
     gesperrt: Boolean,
+    /** Name des Feiertags oder null. */
+    feiertag: String?,
     istHeute: Boolean,
     bearbeitbar: Boolean,
     modifier: Modifier,
@@ -389,6 +412,7 @@ private fun TagZelle(
     val hinter = if (art == null && gesperrt) Chip else f.hinter
     val beschreibung = buildString {
         append("${tag.dayOfMonth}. ${monatsName(YearMonth.from(tag))}")
+        if (feiertag != null) append(", $feiertag")
         if (art != null) append(", ${Wishes.label(art)}")
         else if (gesperrt) append(", kann nie")
     }
@@ -411,6 +435,7 @@ private fun TagZelle(
         )
         val kuerzel = when {
             art != null -> Wishes.code(art)
+            feiertag != null -> "FT"
             gesperrt -> "nie"
             else -> ""
         }
@@ -419,7 +444,11 @@ private fun TagZelle(
             fontSize = 11.sp,
             lineHeight = 14.sp,
             fontWeight = FontWeight.Bold,
-            color = if (art == null) TextLeise else f.schrift,
+            color = when {
+                art != null -> f.schrift
+                feiertag != null -> Fehler
+                else -> TextLeise
+            },
             maxLines = 1,
         )
     }

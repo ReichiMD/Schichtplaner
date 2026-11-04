@@ -11,11 +11,18 @@ object ShiftCalendar {
         for (offset in 0 until days) {
             val date = firstDay.plusDays(offset.toLong())
             val hours = shop.hoursOn(date) ?: continue
-            val isHoliday = date in shop.holidays
+            val isHoliday = shop.isHoliday(date)
+            val isShort = shop.isShortDay(date)
             for (template in shop.templates) {
                 val applies = if (isHoliday) template.onHolidays else date.dayOfWeek in template.weekdays
                 if (!applies) continue
-                val (start, end) = times(template, date, hours)
+                var (start, end) = times(template, date, hours)
+                if (isShort) {
+                    // Kürzerer Tag: Schicht endet spätestens zum Feierabend, beginnt sie erst danach, fällt sie weg.
+                    val close = date.atTime(hours.close)
+                    if (end.isAfter(close)) end = close
+                    if (!end.isAfter(start) || start.toLocalDate() != date) continue
+                }
                 require(end.isAfter(start)) { "Schicht ${template.name} am $date endet vor ihrem Beginn" }
                 repeat(template.staff) { slot -> result += Shift(date, template, slot, start, end) }
             }

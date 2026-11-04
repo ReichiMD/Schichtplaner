@@ -29,6 +29,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
+import de.reichimd.schichtplaner.core.plan.PlanSheet
 import de.reichimd.schichtplaner.core.plan.YearPlan
 import de.reichimd.schichtplaner.core.plan.YearPlans
 import de.reichimd.schichtplaner.core.shop.ShopSettings
@@ -48,6 +49,7 @@ import androidx.core.content.FileProvider
 import de.reichimd.schichtplaner.core.Absence
 import de.reichimd.schichtplaner.core.Employee
 import de.reichimd.schichtplaner.core.ShiftKind
+import de.reichimd.schichtplaner.core.plan.DayNote
 import de.reichimd.schichtplaner.core.plan.PlanPrint
 import de.reichimd.schichtplaner.core.plan.PrintCell
 import de.reichimd.schichtplaner.core.plan.PrintRow
@@ -79,7 +81,7 @@ internal object PlanPdf {
     private const val RAND = 28f
     private const val NAME_BREITE = 96f
     private const val SUMME_BREITE = 48f
-    private const val KOPF_HOEHE = 22f
+    private const val KOPF_HOEHE = 28f
     private const val ABSCHNITT_HOEHE = 16f
     private const val SUMMEN_HOEHE = 22f
     private const val OFFEN_HOEHE = 26f
@@ -173,8 +175,12 @@ internal object PlanPdf {
 
         // Kopf: Wochentage
         val kopf = stift(10f, fett = true)
-        w.days.forEachIndexed { i, d -> mitte(c, d, kopf, RAND + NAME_BREITE + i * tagBreite, tagBreite, y + 14f) }
-        mitte(c, "Std.", kopf, BREITE - RAND - SUMME_BREITE, SUMME_BREITE, y + 14f)
+        w.days.forEachIndexed { i, d -> mitte(c, d, kopf, RAND + NAME_BREITE + i * tagBreite, tagBreite, y + 12f) }
+        // Zweite Kopfzeile: Feiertag oder Heiligabend/Silvester.
+        w.notes.forEachIndexed { i, n ->
+            if (n.isNotEmpty()) mitte(c, n, stift(7f, fett = true, farbe = ROT), RAND + NAME_BREITE + i * tagBreite, tagBreite, y + 23f)
+        }
+        mitte(c, "Std.", kopf, BREITE - RAND - SUMME_BREITE, SUMME_BREITE, y + 12f)
         y += KOPF_HOEHE
         c.drawLine(RAND, y, BREITE - RAND, y, linie)
 
@@ -224,7 +230,7 @@ internal object PlanPdf {
         c.drawRect(RectF(RAND, tabelleOben, BREITE - RAND, y), linie)
 
         val klein = stift(7.5f, farbe = GRAU)
-        c.drawText("P = Pause · U = Urlaub · K = krank · Fr = frei (umrahmt: Frei-Wunsch) · Std. = bezahlte Stunden", RAND, HOEHE - RAND + 6f, klein)
+        c.drawText("P = Pause · U = Urlaub · K = krank · Fr = frei (umrahmt: Frei-Wunsch) · FF = Feiertag · Std. = bezahlte Stunden", RAND, HOEHE - RAND + 6f, klein)
         c.drawText(fuss, BREITE - RAND - klein.measureText(fuss), HOEHE - RAND + 6f, klein)
     }
 
@@ -239,8 +245,8 @@ internal object PlanPdf {
         hintergrund?.let { c.drawRect(x + 0.5f, y + 0.5f, x + breite - 0.5f, y + hoehe - 0.5f, flaeche(it)) }
         if (z.wish) c.drawRect(x + 2f, y + 2f, x + breite - 2f, y + hoehe - 2f, wunschRahmen)
         if (z.bottom.isEmpty()) {
-            // Nur ein Kürzel (U, K, Fr): groß in die Mitte. Normales "Fr" leise, damit Schichten und U/K auffallen.
-            val leise = z.top == PlanPrint.FREE && !z.wish
+            // Nur ein Kürzel (U, K, Fr, FF): groß in die Mitte. Normales "Fr"/"FF" leise, damit Schichten und U/K auffallen.
+            val leise = (z.top == PlanPrint.FREE || z.top == PlanPrint.HOLIDAY) && !z.wish
             val farbe = when {
                 z.wish -> WUNSCH_SCHRIFT
                 leise -> GRAU
@@ -258,14 +264,20 @@ internal object PlanPdf {
     private fun ordner(context: Context) = File(context.cacheDir, "pdf")
 
     /** PDF in den Cache schreiben (alte PDFs dort werden entfernt). Läuft im Hintergrund. */
-    fun datei(context: Context, plan: ShiftPlan, leute: List<Employee>, abwesend: List<Absence>): File {
+    fun datei(
+        context: Context,
+        plan: ShiftPlan,
+        leute: List<Employee>,
+        abwesend: List<Absence>,
+        tage: Map<LocalDate, DayNote> = emptyMap(),
+    ): File {
         val dir = ordner(context)
         dir.mkdirs()
         // Nur alte PDFs weg: Ein gerade geteiltes liest die Ziel-App (WhatsApp, Drive) vielleicht noch.
         val stunde = System.currentTimeMillis() - 60 * 60 * 1000L
         dir.listFiles()?.filter { it.lastModified() < stunde }?.forEach { it.delete() }
         val ziel = File(dir, PlanPrint.fileName(plan))
-        FileOutputStream(ziel).use { schreiben(PlanPrint.weeks(plan, leute, abwesend), it) }
+        FileOutputStream(ziel).use { schreiben(PlanPrint.weeks(plan, leute, abwesend, tage), it) }
         return ziel
     }
 
@@ -349,7 +361,8 @@ internal fun PdfKnoepfe(
         fehler = null
         scope.launch {
             try {
-                val pdf = withContext(Dispatchers.IO) { PlanPdf.datei(context.applicationContext, plan, leute, abwesend) }
+                val tage = PlanSheet.dayNotes(laden, plan.firstDay, plan.lastDay)
+                val pdf = withContext(Dispatchers.IO) { PlanPdf.datei(context.applicationContext, plan, leute, abwesend, tage) }
                 aktion(pdf)
             } catch (e: CancellationException) {
                 throw e

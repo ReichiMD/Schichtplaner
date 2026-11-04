@@ -68,6 +68,7 @@ import de.reichimd.schichtplaner.core.Employee
 import de.reichimd.schichtplaner.core.Planner
 import de.reichimd.schichtplaner.core.ShiftKind
 import de.reichimd.schichtplaner.core.Weekdays
+import de.reichimd.schichtplaner.core.plan.DayNote
 import de.reichimd.schichtplaner.core.plan.PlanCheck
 import de.reichimd.schichtplaner.core.plan.PlanEdit
 import de.reichimd.schichtplaner.core.plan.PlanPrint
@@ -103,6 +104,7 @@ import de.reichimd.schichtplaner.ui.Spaet
 import de.reichimd.schichtplaner.ui.Stepper
 import de.reichimd.schichtplaner.ui.TextLeise
 import de.reichimd.schichtplaner.ui.TextMittel
+import de.reichimd.schichtplaner.ui.Warnung
 import de.reichimd.schichtplaner.update.UpdateBanner
 import de.reichimd.schichtplaner.update.VersionZeile
 import de.reichimd.schichtplaner.wuensche.WuenscheStore
@@ -248,6 +250,7 @@ internal fun PlanScreen(
     val fenster = remember(plan, montag, shop) { YearPlans.weeks(plan, montag.minusWeeks(1), 3, shop) }
     val hinweise = remember(plan, montag, shop, alle, abwesend) { YearPlans.warnings(plan, montag, shop, alle, abwesend) }
     val zeilen = remember(alle, woche) { YearPlans.rows(alle, woche) }
+    val besondereTage = remember(montag, shop) { PlanSheet.dayNotes(shop, montag, montag.plusDays(6)) }
 
     fun ausfuellen() = vm.ausfuellen(montag, teamStore, ladenStore, wuenscheStore, planStore)
     fun aendern(tag: LocalDate, wie: (ShiftPlan) -> ShiftPlan) = planStore.woche(YearPlans.monday(tag), shop, wie)
@@ -383,9 +386,11 @@ internal fun PlanScreen(
         }
 
         Zusammenfassung(woche, alleIds, hinweise)
+        BesondereTage(besondereTage)
         Wochenblatt(
             wochen = wochen,
             wocheVon = { YearPlans.week(plan, it, shop) },
+            tageVon = { m -> if (m == montag) besondereTage else PlanSheet.dayNotes(shop, m, m.plusDays(6)) },
             personen = zeilen,
             alleIds = alleIds,
             abwesend = abwesend,
@@ -597,6 +602,8 @@ private sealed interface BlattZeile {
 private fun Wochenblatt(
     wochen: List<LocalDate>,
     wocheVon: (LocalDate) -> ShiftPlan,
+    /** Feiertage und kürzere Tage der Woche ab diesem Montag. */
+    tageVon: (LocalDate) -> Map<LocalDate, DayNote>,
     /** Zeilen der gezeigten Woche (mit Ausgeschiedenen, die dort gearbeitet haben). */
     personen: List<Employee>,
     /** Alle bekannten Personen: Wer hier drin ist, besetzt eine Schicht. */
@@ -637,6 +644,7 @@ private fun Wochenblatt(
         BlattZeile.Aushilfen -> maxOf(30.dp, zeile * 2 + 6.dp)
         BlattZeile.Offen, BlattZeile.Summe -> maxOf(40.dp, zeile * 2 + 10.dp)
     }
+    val datumHoehe = maxOf(30.dp, zeile * 2 + 6.dp)
     Column(verticalArrangement = Arrangement.spacedBy(ABSTAND)) {
         Row(horizontalArrangement = Arrangement.spacedBy(ABSTAND)) {
             Spacer(Modifier.width(NAMENSPALTE))
@@ -646,6 +654,7 @@ private fun Wochenblatt(
         }
         Row(horizontalArrangement = Arrangement.spacedBy(ABSTAND)) {
             Column(Modifier.width(NAMENSPALTE), verticalArrangement = Arrangement.spacedBy(ABSTAND)) {
+                Box(Modifier.height(datumHoehe))
                 zeilen.forEach { z ->
                     Box(Modifier.height(hoehe(z)).fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
                         NamensZelle(z, plan, abwesend, teamIds, 0)
@@ -664,7 +673,11 @@ private fun Wochenblatt(
                 val seitenPlan = if (seite == pager.currentPage) plan else wocheVon(wochen[seite])
                 val seitenHinweise = if (seite == pager.currentPage) hinweiseAn else emptyMap()
                 val tage = PlanSheet.weekDays(seitenPlan, 0)
+                val notizen = tageVon(seitenPlan.firstDay)
                 Column(verticalArrangement = Arrangement.spacedBy(ABSTAND)) {
+                    Row(Modifier.height(datumHoehe), horizontalArrangement = Arrangement.spacedBy(ABSTAND)) {
+                        tage.forEach { tag -> DatumZelle(tag, notizen[tag], Modifier.weight(1f).fillMaxSize()) }
+                    }
                     zeilen.forEach { z ->
                         Row(Modifier.height(hoehe(z)), horizontalArrangement = Arrangement.spacedBy(ABSTAND)) {
                             tage.forEach { tag ->
@@ -678,6 +691,7 @@ private fun Wochenblatt(
                                             tag = tag,
                                             schicht = schicht,
                                             abwesend = abwesendAm[z.e.id to tag],
+                                            feiertag = notizen[tag]?.holiday == true,
                                             hinweise = schicht?.let { seitenHinweise[z.e.id to it.key] }.orEmpty(),
                                             imPlan = imPlan,
                                             aenderbar = aenderbar,
@@ -733,6 +747,7 @@ private fun SchichtZelle(
     tag: LocalDate,
     schicht: PlanSlot?,
     abwesend: AbsenceType?,
+    feiertag: Boolean,
     hinweise: List<Warning>,
     imPlan: Boolean,
     aenderbar: Boolean,
@@ -759,7 +774,8 @@ private fun SchichtZelle(
         append(
             when {
                 schicht != null -> "${schicht.name} ${zeitText(schicht)}, ${PlanSheet.hours(schicht.paidMinutes)} Stunden"
-                freiWunsch -> "frei (Frei-Wunsch)"
+                freiWunsch -> if (feiertag) "Feiertag frei (Frei-Wunsch)" else "frei (Frei-Wunsch)"
+                feiertag && abwesend != AbsenceType.SICK -> "Feiertag frei"
                 abwesend != null -> Wishes.label(abwesend)
                 else -> "frei"
             },
@@ -788,7 +804,7 @@ private fun SchichtZelle(
     ) {
         if (schicht == null) {
             // Wie auf dem Papier: jeder freie Tag "Fr", ein Frei-Wunsch grün hinterlegt.
-            val zelle = PlanPrint.free(abwesend, person.isBackup)
+            val zelle = PlanPrint.free(abwesend, person.isBackup, feiertag)
             Text(
                 zelle.top,
                 fontSize = 13.sp,
@@ -812,6 +828,61 @@ private fun SchichtZelle(
             Text(PlanSheet.hours(schicht.paidMinutes), fontSize = 10.sp, lineHeight = ZELLE_ZEILENHOEHE, fontWeight = FontWeight.Bold, color = Schrift, maxLines = 1)
         }
     }
+}
+
+/** Datum über der Spalte, Feiertage rot ("FT"), Heiligabend/Silvester als "kurz". */
+@Composable
+private fun DatumZelle(tag: LocalDate, notiz: DayNote?, modifier: Modifier) {
+    val form = RoundedCornerShape(6.dp)
+    val m = when {
+        notiz == null -> modifier
+        notiz.holiday -> modifier.background(FehlerHell, form)
+        else -> modifier.background(Warnung, form)
+    }
+    Column(
+        m.semantics(mergeDescendants = true) {
+            contentDescription = tagText(tag) + (notiz?.let { ", ${it.label}" + if (it.closed) ", Laden zu" else "" } ?: "")
+        }.testTag("datum-$tag"),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text("${tag.dayOfMonth}.", fontSize = 11.sp, lineHeight = ZELLE_ZEILENHOEHE, fontWeight = FontWeight.Bold, color = Schrift, maxLines = 1)
+        if (notiz != null) {
+            Text(
+                when {
+                    notiz.holiday && notiz.closed -> "zu"
+                    notiz.holiday -> "FT"
+                    else -> "kurz"
+                },
+                fontSize = 9.sp,
+                lineHeight = ZELLE_ZEILENHOEHE,
+                fontWeight = FontWeight.Bold,
+                color = if (notiz.holiday) Fehler else TextMittel,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+/** Unter der Zusammenfassung: welche Feiertage und kürzeren Tage in der gezeigten Woche liegen. */
+@Composable
+private fun BesondereTage(tage: Map<LocalDate, DayNote>) {
+    if (tage.isEmpty()) return
+    Text(
+        tage.toSortedMap().entries.joinToString("\n") { (d, n) ->
+            "${tagText(d)}: ${n.label}" + when {
+                n.holiday && n.closed -> " (Laden zu)"
+                n.holiday -> " (Feiertag)"
+                else -> " (kürzer)"
+            }
+        },
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Bold,
+        color = Fehler,
+        modifier = Modifier
+            .padding(horizontal = 8.dp)
+            .testTag("besondere-tage"),
+    )
 }
 
 @Composable
@@ -862,7 +933,7 @@ private fun Legende() {
             Eintrag(WunschErfuelltHell, "Fr = Frei-Wunsch erfüllt")
             Text("Fr in einer Schicht = Frei-Wunsch nicht erfüllt", fontSize = 12.sp, color = FreiWunsch)
             Text("P = Pause", fontSize = 12.sp, color = TextMittel)
-            Text("U Urlaub · K krank", fontSize = 12.sp, color = TextMittel)
+            Text("U Urlaub · K krank · FF Feiertag", fontSize = 12.sp, color = TextMittel)
         }
         Text("Feld antippen, um die Schicht zu ändern oder zu tauschen.", fontSize = 12.sp, color = TextLeise)
     }

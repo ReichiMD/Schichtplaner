@@ -119,6 +119,42 @@ class LadenOnDeviceTest {
     }
 
     @Test
+    fun feiertageEinstellen() {
+        val store = LadenStore(dir)
+        warte(store)
+        compose.setContent { LadenBereich(store = store) }
+
+        compose.onNodeWithTag("laden-feiertage").performScrollTo().performClick()
+        // Bundesland wechseln: Bayern.
+        compose.onNodeWithText("Sachsen-Anhalt").performScrollTo().performClick()
+        compose.onNodeWithTag("land-BY").performScrollTo().performClick()
+        // Silvester ist als kürzerer Tag vorbelegt.
+        compose.onNodeWithTag("kurz-silvester-form").performScrollTo()
+        compose.onNodeWithContentDescription("Feierabend Silvester später").assertExists()
+        compose.onNodeWithTag("speichern").performClick()
+
+        val z = warte(store)
+        assertTrue(z.eingerichtet)
+        assertEquals(de.reichimd.schichtplaner.core.shop.FederalState.BY, z.laden.state)
+        assertEquals(Shop.EXAMPLE.holidayHours, z.laden.holidayHours)
+        compose.onNodeWithTag("laden-feiertage").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun feiertagsZeitFalschZeigtFehler() {
+        val store = LadenStore(dir)
+        warte(store)
+        compose.setContent { LadenBereich(store = store) }
+
+        compose.onNodeWithTag("laden-feiertage").performScrollTo().performClick()
+        // Feierabend an Feiertagen vor den Beginn stellen (17:30 -> 04:15).
+        repeat(53) { compose.onNodeWithContentDescription("Feierabend an Feiertagen früher").performClick() }
+        compose.onNodeWithTag("speichern").performClick()
+        compose.onNodeWithTag("nicht-gespeichert").assertIsDisplayed()
+        assertFalse(warte(store).eingerichtet)
+    }
+
+    @Test
     fun oeffnungszeitFalschZeigtFehlerAmTag() {
         val store = LadenStore(dir)
         warte(store)

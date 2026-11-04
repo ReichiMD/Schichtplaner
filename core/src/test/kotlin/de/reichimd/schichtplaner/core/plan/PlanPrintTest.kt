@@ -116,4 +116,45 @@ class PlanPrintTest {
     fun dateiname() {
         assertEquals("schichtplan-2026-11-02.pdf", PlanPrint.fileName(plan))
     }
+
+    @Test
+    fun feiertagHeisstFFundStehtImKopf() {
+        // Weihnachtswoche 2026: Do 24.12. Heiligabend, Fr 25.12. und Sa 26.12. Feiertage.
+        val montag = LocalDate.of(2026, 12, 21)
+        val shop = de.reichimd.schichtplaner.core.shop.Shop.EXAMPLE
+        val woche = YearPlans.week(YearPlan.EMPTY, montag, shop)
+        val notes = PlanSheet.dayNotes(shop, montag, montag.plusDays(6))
+        val w = PlanPrint.week(
+            woche, team,
+            listOf(
+                Absence("b", montag.plusDays(4), AbsenceType.VACATION),
+                Absence("a", montag.plusDays(5), AbsenceType.SICK),
+            ),
+            0, notes,
+        )
+        assertEquals(listOf("", "", "", "Heiligabend", "1. Weihnachtstag", "2. Weihnachtstag", ""), w.notes)
+        val zeilen = w.rows.filterIsInstance<PrintRow.Person>().associateBy { it.name }
+        assertEquals(listOf("Fr", "Fr", "Fr", "Fr", "FF", "K", "Fr"), zeilen.getValue("Anna").cells.map { it.top })
+        // Urlaub an einem Feiertag ist FF (kein Urlaubstag).
+        assertEquals("FF", zeilen.getValue("Ben").cells[4].top)
+        // Aushilfen ohne Eintrag bleiben leer, auch an Feiertagen.
+        assertEquals("", zeilen.getValue("Hanna").cells[4].top)
+        // Frei-Wunsch am Feiertag: FF, farbig.
+        assertEquals(PrintCell("FF", wish = true), PlanPrint.free(AbsenceType.DAY_OFF_WISH, holiday = true))
+    }
+
+    @Test
+    fun geschlossenerFeiertagImKopf() {
+        val shop = de.reichimd.schichtplaner.core.shop.Shop.EXAMPLE.copy(
+            closedHolidays = setOf(de.reichimd.schichtplaner.core.shop.HolidayId.WEIHNACHTEN_1),
+            shortDays = emptyMap(),
+        )
+        val montag = LocalDate.of(2026, 12, 21)
+        val notes = PlanSheet.dayNotes(shop, montag, montag.plusDays(6))
+        assertEquals(setOf(montag.plusDays(4), montag.plusDays(5)), notes.keys)
+        assertTrue(notes.getValue(montag.plusDays(4)).closed)
+        val woche = YearPlans.week(YearPlan.EMPTY, montag, shop)
+        assertTrue(woche.slotsOn(montag.plusDays(4)).isEmpty())
+        assertEquals("1. Weihnachtstag (zu)", PlanPrint.week(woche, team, emptyList(), 0, notes).notes[4])
+    }
 }
