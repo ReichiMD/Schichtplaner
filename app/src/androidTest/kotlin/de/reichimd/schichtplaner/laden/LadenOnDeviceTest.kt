@@ -129,8 +129,7 @@ class LadenOnDeviceTest {
         compose.onNodeWithText("Sachsen-Anhalt").performScrollTo().performClick()
         compose.onNodeWithTag("land-BY").performScrollTo().performClick()
         // Silvester ist als kürzerer Tag vorbelegt.
-        compose.onNodeWithTag("kurz-silvester-form").performScrollTo()
-        compose.onNodeWithContentDescription("Feierabend Silvester später").assertExists()
+        compose.onNodeWithContentDescription("Feierabend Silvester später").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("speichern").performClick()
 
         val z = warte(store)
