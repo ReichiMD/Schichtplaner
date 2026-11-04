@@ -95,9 +95,9 @@ internal object PlanPdf {
     private const val SPAET = 0xFFE6EFF9.toInt()
     private const val ABSCHNITT = 0xFFF1ECE4.toInt()
     private const val ROT = 0xFFB3261E.toInt()
-    // Frei-Wunsch: grün wie im Wünsche-Kalender (auch schwarz-weiß gedruckt noch als grauer Kasten erkennbar).
+    // Frei-Wunsch erfüllt: grün hinterlegt, dazu ein Rahmen, damit es auch schwarz-weiß gedruckt auffällt.
     private const val WUNSCH = 0xFFDDEFD8.toInt()
-    private const val WUNSCH_SCHRIFT = 0xFF2E7D32.toInt()
+    private const val WUNSCH_SCHRIFT = 0xFF1B5E20.toInt()
 
     private val DATUM = DateTimeFormatter.ofPattern("dd.MM.yyyy")
 
@@ -125,6 +125,7 @@ internal object PlanPdf {
     private fun flaeche(farbe: Int) = Paint().apply { color = farbe; style = Paint.Style.FILL }
 
     private val linie = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = LINIE; style = Paint.Style.STROKE; strokeWidth = 0.6f }
+    private val wunschRahmen = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = WUNSCH_SCHRIFT; style = Paint.Style.STROKE; strokeWidth = 1.2f }
 
     /** Text in eine Breite einpassen: kleiner machen, notfalls hinten abschneiden. */
     private fun passend(text: String, stift: Paint, breite: Float): String {
@@ -223,7 +224,7 @@ internal object PlanPdf {
         c.drawRect(RectF(RAND, tabelleOben, BREITE - RAND, y), linie)
 
         val klein = stift(7.5f, farbe = GRAU)
-        c.drawText("P = Pause · U = Urlaub · K = krank · Fr = frei (grün: Frei-Wunsch) · Std. = bezahlte Stunden", RAND, HOEHE - RAND + 6f, klein)
+        c.drawText("P = Pause · U = Urlaub · K = krank · Fr = frei (umrahmt: Frei-Wunsch) · Std. = bezahlte Stunden", RAND, HOEHE - RAND + 6f, klein)
         c.drawText(fuss, BREITE - RAND - klein.measureText(fuss), HOEHE - RAND + 6f, klein)
     }
 
@@ -236,6 +237,7 @@ internal object PlanPdf {
             else -> null
         }
         hintergrund?.let { c.drawRect(x + 0.5f, y + 0.5f, x + breite - 0.5f, y + hoehe - 0.5f, flaeche(it)) }
+        if (z.wish) c.drawRect(x + 2f, y + 2f, x + breite - 2f, y + hoehe - 2f, wunschRahmen)
         if (z.bottom.isEmpty()) {
             // Nur ein Kürzel (U, K, Fr): groß in die Mitte. Normales "Fr" leise, damit Schichten und U/K auffallen.
             val leise = z.top == PlanPrint.FREE && !z.wish

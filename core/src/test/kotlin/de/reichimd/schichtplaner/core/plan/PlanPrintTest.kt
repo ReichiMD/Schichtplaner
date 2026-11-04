@@ -67,6 +67,9 @@ class PlanPrintTest {
         val b = zeilen.getValue("Ben")
         assertEquals(PrintCell("12:30–18:30", "6", ShiftKind.LATE), b.cells[0])
         assertEquals(PrintCell("U"), b.cells[1])
+
+        // Aushilfe aus anderer Filiale ohne Eintrag: leer statt "Fr".
+        assertEquals(PrintCell(""), zeilen.getValue("Hanna").cells[0])
         assertEquals("6", b.hours)
     }
 

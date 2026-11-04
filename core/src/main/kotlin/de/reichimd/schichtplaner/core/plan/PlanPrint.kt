@@ -69,7 +69,7 @@ object PlanPrint {
             cells = days.map { d ->
                 when {
                     !PlanSheet.inPlan(plan, d) -> PrintCell("", inPlan = false)
-                    else -> plan.slotsOf(e.id, d).firstOrNull()?.let { cell(it) } ?: free(absent[e.id to d])
+                    else -> plan.slotsOf(e.id, d).firstOrNull()?.let { cell(it) } ?: free(absent[e.id to d], e.isBackup)
                 }
             },
             hours = PlanSheet.hours(PlanSheet.paidMinutes(plan, e.id, week)),
@@ -121,9 +121,12 @@ object PlanPrint {
         )
     }
 
-    /** Tag ohne Schicht: U oder K aus dem Kalender, sonst "Fr" (farbig, wenn es ein Frei-Wunsch war). */
-    fun free(absence: AbsenceType?): PrintCell = when (absence) {
-        null -> PrintCell(FREE)
+    /**
+     * Tag ohne Schicht: U oder K aus dem Kalender, sonst "Fr" (farbig, wenn es ein Frei-Wunsch war).
+     * Aushilfen aus anderen Filialen ohne Eintrag bleiben leer, sie sind ja nicht unser "Frei".
+     */
+    fun free(absence: AbsenceType?, backup: Boolean = false): PrintCell = when (absence) {
+        null -> PrintCell(if (backup) "" else FREE)
         AbsenceType.DAY_OFF_WISH -> PrintCell(FREE, wish = true)
         else -> PrintCell(Wishes.code(absence))
     }
