@@ -39,7 +39,7 @@ object DemoData {
         return PlanningRequest(
             firstDay = firstDay,
             days = laden.planDays,
-            shop = laden.toConfig(),
+            shop = laden.toConfig(firstDay, lastDay),
             employees = employees,
             // Nur was in den Zeitraum fällt und zu Personen im Team gehört.
             absences = Wishes.forPlan(absences, employees, firstDay, lastDay),

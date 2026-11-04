@@ -95,6 +95,7 @@ import java.time.LocalTime
 import java.util.UUID
 
 private const val ZEITEN = "__zeiten__"
+private const val FEIERTAGE = "__feiertage__"
 private const val NEU = "__neu__"
 
 /**
@@ -116,6 +117,7 @@ internal fun LadenBereich(
     when {
         id == null -> LadenUebersicht(zustand, store, Team.active(team.team).map { it.monthlyHours }, oeffnen = { offen = it })
         id == ZEITEN -> OeffnungszeitenBearbeiten(zustand.laden, store, schliessen = { offen = null })
+        id == FEIERTAGE -> FeiertageBearbeiten(zustand.laden, store, schliessen = { offen = null })
         else -> {
             val vorhanden = zustand.laden.templates.firstOrNull { it.id == id }
             if (id != NEU && vorhanden == null) {
@@ -211,8 +213,11 @@ private fun LadenUebersicht(zustand: LadenZustand, store: LadenStore, teamMonats
                     )
                 }
             }
-            Text("Feiertage: wie Sonntag (vorläufig). Stunden nach Pausenabzug.", fontSize = 13.sp, color = TextLeise)
+            Text("Stunden nach Pausenabzug, in einer Woche ohne Feiertage.", fontSize = 13.sp, color = TextLeise)
         }
+
+        // Feiertage, Heiligabend und Silvester
+        FeiertageKarte(laden, enabled = zustand.bearbeitbar) { oeffnen(FEIERTAGE) }
 
         // Schichten
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -241,7 +246,7 @@ private fun LadenUebersicht(zustand: LadenZustand, store: LadenStore, teamMonats
                     Spacer(Modifier.width(8.dp))
                     Text("›", fontSize = 22.sp, color = TextLeise)
                 }
-                val vorschau = Shop.preview(t, laden.openingHours)
+                val vorschau = Shop.preview(t, laden.openingHours, laden.holidayHours)
                 if (vorschau.isEmpty()) {
                     Text("Fällt auf keinen Arbeitstag", fontSize = 14.sp, color = TextLeise)
                 } else {
@@ -257,7 +262,7 @@ private fun LadenUebersicht(zustand: LadenZustand, store: LadenStore, teamMonats
 }
 
 @Composable
-private fun Karte(
+internal fun Karte(
     enabled: Boolean,
     tag: String,
     beschreibung: String,
@@ -283,8 +288,8 @@ private fun Karte(
 /** Entwurf eines Tages. Zeiten in Minuten ab Mitternacht, damit der Entwurf Drehen übersteht. */
 private data class TagEntwurf(val offen: Boolean, val auf: Int, val zu: Int)
 
-private fun minuten(t: LocalTime) = t.hour * 60 + t.minute
-private fun zeit(min: Int) = LocalTime.of(min / 60, min % 60)
+internal fun minuten(t: LocalTime) = t.hour * 60 + t.minute
+internal fun zeit(min: Int) = LocalTime.of(min / 60, min % 60)
 
 /** "1,1,360,1080;2,..." für alle sieben Tage. */
 private fun tageAlsText(tage: Map<DayOfWeek, TagEntwurf>) =
@@ -355,7 +360,7 @@ private fun OeffnungszeitenBearbeiten(laden: ShopSettings, store: LadenStore, sc
     ) {
         Text(
             "Vom ersten Schichtbeginn bis Feierabend, nicht die Öffnungszeit. „Bis Arbeitsende“ bei einer Schicht " +
-                "meint diese Uhrzeit. Feiertage gelten vorläufig wie Sonntag.",
+                "meint diese Uhrzeit. Feiertage, Heiligabend und Silvester stehen unter „Feiertage“.",
             fontSize = 14.sp,
             color = TextLeise,
         )
@@ -405,7 +410,7 @@ private val TAGNAME = mapOf(
 
 /** Uhrzeit mit Minus und Plus in 15-Minuten-Schritten. */
 @Composable
-private fun ZeitZeile(was: String, minuten: Int, beschreibung: String, neu: (Int) -> Unit) {
+internal fun ZeitZeile(was: String, minuten: Int, beschreibung: String, neu: (Int) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(was, fontSize = 15.sp, color = TextMittel, modifier = Modifier.width(76.dp))
         Box(Modifier.weight(1f)) {
@@ -437,6 +442,7 @@ private fun SchichtBearbeiten(original: ShiftTemplate?, laden: ShopSettings, sto
     var endeNach by rememberSaveable { mutableStateOf((original?.end as? ShiftEnd.AfterClose)?.minutes?.toInt() ?: 0) }
     var tage by rememberSaveable { mutableStateOf((original?.weekdays ?: DayOfWeek.entries.toSet()).sorted().joinToString("") { "${it.value}" }) }
     var personen by rememberSaveable { mutableStateOf(original?.staff ?: 1) }
+    var feiertags by rememberSaveable { mutableStateOf(original?.onHolidays ?: true) }
     var versucht by rememberSaveable { mutableStateOf(false) }
     var verwerfenFrage by remember { mutableStateOf(false) }
     var loeschenFrage by remember { mutableStateOf(false) }
@@ -453,6 +459,7 @@ private fun SchichtBearbeiten(original: ShiftTemplate?, laden: ShopSettings, sto
         end = if (endeFest) ShiftEnd.At(zeit(endeZeit)) else ShiftEnd.AfterClose(endeNach.toLong()),
         weekdays = tageSet(),
         staff = personen,
+        onHolidays = feiertags,
     )
 
     // Fester Ausgangsstand (nicht aus den Eingaben), damit "geändert?" auch nach dem Drehen stimmt.
@@ -598,6 +605,10 @@ private fun SchichtBearbeiten(original: ShiftTemplate?, laden: ShopSettings, sto
                     }
                 }
             }
+            Schalter("Auch an Feiertagen", feiertags, Frueh) { feiertags = !feiertags }
+            if (laden.holidayHours == null) {
+                Text("An Feiertagen ist der Laden zu (siehe „Feiertage“).", fontSize = 13.sp, color = TextLeise)
+            }
         }
 
         Abschnitt("Wie viele Personen?", fehler = eigene(TemplatePart.STAFF), requester = requester[TemplatePart.STAFF]) {
@@ -612,7 +623,7 @@ private fun SchichtBearbeiten(original: ShiftTemplate?, laden: ShopSettings, sto
         }
 
         // Zeigt sofort, wann die Schicht wirklich liegt. Gerade bei "bis Arbeitsende" hilfreich.
-        val vorschau = Shop.preview(entwurf(), laden.openingHours)
+        val vorschau = Shop.preview(entwurf(), laden.openingHours, laden.holidayHours)
         Column(
             Modifier
                 .fillMaxWidth()
@@ -624,6 +635,10 @@ private fun SchichtBearbeiten(original: ShiftTemplate?, laden: ShopSettings, sto
             Text("So liegt die Schicht", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextMittel)
             if (vorschau.isEmpty()) Text("an keinem Arbeitstag mit gültigen Zeiten", fontSize = 15.sp, color = Schrift)
             vorschau.forEach { Text(it, fontSize = 16.sp, color = Schrift) }
+            // Heiligabend/Silvester: gleiche Regel wie im Plan (endet spätestens zum Feierabend).
+            laden.shortDays.toSortedMap().forEach { (tag, h) ->
+                Text("${tag.label}: ${Shop.shortDayTimes(entwurf(), h) ?: "fällt weg"}", fontSize = 14.sp, color = TextMittel)
+            }
         }
 
         if (original != null) {
@@ -660,19 +675,21 @@ private val TEILNAME = mapOf(
 )
 
 /** Problem, das nicht in diesem Formular steht, z. B. eine Schicht, die durch eine neue Arbeitszeit nicht mehr passt. */
-private fun fremdText(p: Problem<ShopField>, laden: ShopSettings): String = when (val f = p.field) {
+internal fun fremdText(p: Problem<ShopField>, laden: ShopSettings): String = when (val f = p.field) {
     is ShopField.Template -> {
         val name = laden.templates.firstOrNull { it.id == f.id }?.name ?: "?"
         "Schicht „$name“ (${TEILNAME.getValue(f.part)}): ${p.message}"
     }
     is ShopField.Day -> "${Weekdays.short(f.day)}: ${p.message}"
+    ShopField.HolidayHours -> "Feiertage: ${p.message}"
+    is ShopField.Short -> "${f.day.label}: ${p.message}"
     else -> p.message
 }
 
 // ---------- gemeinsame Teile der Formulare ----------
 
 @Composable
-private fun Formular(
+internal fun Formular(
     titel: String,
     zurueck: () -> Unit,
     unten: @Composable () -> Unit,
@@ -711,7 +728,7 @@ private fun Formular(
 }
 
 @Composable
-private fun SpeichernKnopf(onClick: () -> Unit) {
+internal fun SpeichernKnopf(onClick: () -> Unit) {
     Button(
         onClick = onClick,
         colors = ButtonDefaults.buttonColors(containerColor = Akzent),
@@ -724,7 +741,7 @@ private fun SpeichernKnopf(onClick: () -> Unit) {
 }
 
 @Composable
-private fun VerwerfenFrage(abbrechen: () -> Unit, verwerfen: () -> Unit) {
+internal fun VerwerfenFrage(abbrechen: () -> Unit, verwerfen: () -> Unit) {
     AlertDialog(
         onDismissRequest = abbrechen,
         title = { Text("Änderungen verwerfen?") },
@@ -735,7 +752,7 @@ private fun VerwerfenFrage(abbrechen: () -> Unit, verwerfen: () -> Unit) {
 }
 
 /** "19 h", "18,5 h" oder "18,25 h" (Viertelstunden ohne Rundung). */
-private fun stunden(minuten: Long): String = when {
+internal fun stunden(minuten: Long): String = when {
     minuten % 60 == 0L -> "${minuten / 60} h"
     minuten % 30 == 0L -> String.format(java.util.Locale.GERMANY, "%.1f h", minuten / 60.0)
     else -> String.format(java.util.Locale.GERMANY, "%.2f h", minuten / 60.0)

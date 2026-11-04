@@ -6,6 +6,7 @@ import de.reichimd.schichtplaner.core.Employee
 import de.reichimd.schichtplaner.core.ShiftKind
 import de.reichimd.schichtplaner.core.Weekdays
 import de.reichimd.schichtplaner.core.wishes.Wishes
+import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.IsoFields
 
@@ -38,12 +39,14 @@ data class PrintWeek(
     /** Kopf der Tagesspalten, z. B. "Mo 02.11." */
     val days: List<String>,
     val rows: List<PrintRow>,
+    /** Je Tag eine zweite Kopfzeile, z. B. "Reformationstag", sonst leer. */
+    val notes: List<String> = days.map { "" },
 )
 
 /**
  * Inhalt des PDF-Exports, reines Kotlin und damit ohne Handy testbar. Gezeichnet wird in der App.
- * Gedruckt wird nur, was das Team braucht: Zeiten, Pause, Stunden und die Kürzel U, K, Fr
- * (jeder freie Tag ist "Fr", ein erfüllter Frei-Wunsch farbig hinterlegt).
+ * Gedruckt wird nur, was das Team braucht: Zeiten, Pause, Stunden und die Kürzel U, K, Fr, FF
+ * (jeder freie Tag ist "Fr", an Feiertagen "FF", ein erfüllter Frei-Wunsch farbig hinterlegt).
  * Warnungen (⚠, nicht erfüllte Wünsche) gehören nicht aufs Blatt im Laden.
  */
 object PlanPrint {
@@ -52,14 +55,26 @@ object PlanPrint {
     const val TOTALS_LABEL = "ges. Stunden"
     const val OPEN_LABEL = "offen"
     const val FREE = "Fr"
+    const val HOLIDAY = "FF"
 
     private val DAY = DateTimeFormatter.ofPattern("dd.MM.")
     private val DAY_YEAR = DateTimeFormatter.ofPattern("dd.MM.yyyy")
 
-    fun weeks(plan: ShiftPlan, employees: List<Employee>, absences: List<Absence>): List<PrintWeek> =
-        (0 until plan.weeks).map { week(plan, employees, absences, it) }
+    /** [notes]: Feiertage und kürzere Tage, siehe [PlanSheet.dayNotes]. */
+    fun weeks(
+        plan: ShiftPlan,
+        employees: List<Employee>,
+        absences: List<Absence>,
+        notes: Map<LocalDate, DayNote> = emptyMap(),
+    ): List<PrintWeek> = (0 until plan.weeks).map { week(plan, employees, absences, it, notes) }
 
-    fun week(plan: ShiftPlan, employees: List<Employee>, absences: List<Absence>, week: Int): PrintWeek {
+    fun week(
+        plan: ShiftPlan,
+        employees: List<Employee>,
+        absences: List<Absence>,
+        week: Int,
+        notes: Map<LocalDate, DayNote> = emptyMap(),
+    ): PrintWeek {
         val days = PlanSheet.weekDays(plan, week)
         val teamIds = employees.map { it.id }.toSet()
         val absent = absences.associate { (it.employeeId to it.date) to it.type }
@@ -69,7 +84,7 @@ object PlanPrint {
             cells = days.map { d ->
                 when {
                     !PlanSheet.inPlan(plan, d) -> PrintCell("", inPlan = false)
-                    else -> plan.slotsOf(e.id, d).firstOrNull()?.let { cell(it) } ?: free(absent[e.id to d], e.isBackup)
+                    else -> plan.slotsOf(e.id, d).firstOrNull()?.let { cell(it) } ?: free(absent[e.id to d], e.isBackup, notes[d]?.holiday == true)
                 }
             },
             hours = PlanSheet.hours(PlanSheet.paidMinutes(plan, e.id, week)),
@@ -118,17 +133,32 @@ object PlanPrint {
             title = "KW ${first.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)} · ${first.format(DAY)} – ${last.format(DAY_YEAR)}",
             days = days.map { "${Weekdays.short(it.dayOfWeek)} ${it.format(DAY)}" },
             rows = rows,
+            notes = days.map { d ->
+                val n = notes[d]
+                when {
+                    n == null || !PlanSheet.inPlan(plan, d) -> ""
+                    // "zu" vorn, damit es beim Kürzen langer Namen nicht verloren geht.
+                    n.closed -> "zu: ${n.label}"
+                    else -> n.label
+                }
+            },
         )
     }
 
     /**
      * Tag ohne Schicht: U oder K aus dem Kalender, sonst "Fr" (farbig, wenn es ein Frei-Wunsch war).
+     * An einem Feiertag ([holiday]) heißt frei "FF", auch bei Urlaub (ein Feiertag ist kein Urlaubstag);
+     * nur K bleibt stehen.
      * Aushilfen aus anderen Filialen ohne Eintrag bleiben leer, sie sind ja nicht unser "Frei".
      */
-    fun free(absence: AbsenceType?, backup: Boolean = false): PrintCell = when (absence) {
-        null -> PrintCell(if (backup) "" else FREE)
-        AbsenceType.DAY_OFF_WISH -> PrintCell(FREE, wish = true)
-        else -> PrintCell(Wishes.code(absence))
+    fun free(absence: AbsenceType?, backup: Boolean = false, holiday: Boolean = false): PrintCell {
+        val free = if (holiday) HOLIDAY else FREE
+        return when (absence) {
+            null -> PrintCell(if (backup) "" else free)
+            AbsenceType.DAY_OFF_WISH -> PrintCell(free, wish = true)
+            AbsenceType.VACATION -> PrintCell(if (holiday) HOLIDAY else Wishes.code(absence))
+            AbsenceType.SICK -> PrintCell(Wishes.code(absence))
+        }
     }
 
     /** "4:30–11:30" und darunter "P 0,5 · 6,5" bzw. nur "6". */

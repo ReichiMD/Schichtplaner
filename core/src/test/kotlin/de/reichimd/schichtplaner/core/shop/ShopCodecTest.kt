@@ -36,6 +36,40 @@ class ShopCodecTest {
     }
 
     @Test
+    fun feiertagsEinstellungenHinUndZurueck() {
+        val s = Shop.EXAMPLE.copy(
+            state = FederalState.SN,
+            holidayHours = null,
+            closedHolidays = setOf(HolidayId.WEIHNACHTEN_1, HolidayId.NEUJAHR),
+            shortDays = mapOf(ShortDay.SILVESTER to DayHours(LocalTime.of(5, 0), LocalTime.of(13, 0))),
+            templates = Shop.EXAMPLE.templates.map { it.copy(onHolidays = it.id == "f2") },
+        )
+        assertEquals(s, ShopCodec.decode(ShopCodec.encode(s)))
+        assertEquals(s.copy(holidayHours = DayHours(LocalTime.of(6, 0), LocalTime.of(12, 0))).let { ShopCodec.decode(ShopCodec.encode(it)) }.holidayHours,
+            DayHours(LocalTime.of(6, 0), LocalTime.of(12, 0)))
+    }
+
+    @Test
+    fun version2BekommtFeiertageWieSonntag() {
+        val text = """{"version":2,
+            "openingHours":[{"day":1,"open":"04:30","close":"18:30"},{"day":7,"open":"05:00","close":"17:30"}],
+            "templates":[
+              {"id":"f","name":"Früh","kind":"early","startTime":"05:00","endTime":"11:00","weekdays":[1,7]},
+              {"id":"s","name":"Spät","kind":"late","startTime":"12:30","endAfterClose":0,"weekdays":[1]}
+            ]}"""
+        val s = ShopCodec.decode(text)
+        assertEquals(FederalState.ST, s.state)
+        assertEquals(DayHours(LocalTime.of(5, 0), LocalTime.of(17, 30)), s.holidayHours)
+        assertEquals(Shop.SHORT_DAYS_DEFAULT, s.shortDays)
+        assertEquals(emptySet(), s.closedHolidays)
+        // Wer sonntags gilt, gilt an Feiertagen.
+        assertEquals(mapOf("f" to true, "s" to false), s.templates.associate { it.id to it.onHolidays })
+        // Ohne Sonntag: an Feiertagen zu (wie bisher).
+        val ohneSonntag = ShopCodec.decode("""{"version":2,"openingHours":[{"day":1,"open":"04:30","close":"18:30"}]}""")
+        assertEquals(null, ohneSonntag.holidayHours)
+    }
+
+    @Test
     fun unbekannteFelderWerdenUeberlesen() {
         val text = """{"version":1,"neu":true,"openingHours":[{"day":1,"open":"06:00","close":"18:00","x":1}],"templates":[]}"""
         val s = ShopCodec.decode(text)
@@ -60,6 +94,9 @@ class ShopCodecTest {
             """{"version":1,"templates":[{"id":"a","name":"A","kind":"early","startTime":"05:00","startBeforeClose":30,"endTime":"12:00"}]}""",
             """{"version":1,"templates":[{$tpl},{$tpl}]}""",
             """[1,2]""",
+            """{"version":3,"state":"XY"}""",
+            """{"version":3,"holidayHours":{"open":"25:00","close":"12:00"}}""",
+            """{"version":3,"shortDays":[{"day":"heiligabend","open":"05:00","close":"14:00"},{"day":"heiligabend","open":"05:00","close":"13:00"}]}""",
         )
         for (text in kaputt) {
             assertFailsWith<DataFileException>("sollte abgelehnt werden: $text") { ShopCodec.decode(text) }
@@ -118,7 +155,7 @@ class ShopCodecTest {
 
     @Test
     fun neuereVersionWirdNichtGelesen() {
-        assertFailsWith<DataFileTooNewException> { ShopCodec.decode("""{"version":3}""") }
+        assertFailsWith<DataFileTooNewException> { ShopCodec.decode("""{"version":${ShopCodec.VERSION + 1}}""") }
     }
 
     @Test

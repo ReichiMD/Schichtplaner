@@ -61,9 +61,9 @@ object YearPlans {
         return generateSequence(first) { it.plusWeeks(1) }.takeWhile { !it.isAfter(last) }.toList()
     }
 
-    /** Offene Schichten einer Woche aus den Vorlagen des Ladens (Feiertage noch wie normale Tage). */
+    /** Offene Schichten einer Woche aus den Vorlagen des Ladens, mit Feiertagen und kürzeren Tagen. */
     fun templateSlots(monday: LocalDate, shop: ShopSettings): List<PlanSlot> =
-        ShiftCalendar.shifts(monday, 7, shop.toConfig()).map {
+        ShiftCalendar.shifts(monday, 7, shop.toConfig(monday, monday.plusDays(6))).map {
             PlanSlot(SlotKey(it.date, it.template.id, it.slot), it.template.name, it.kind, it.start, it.end, null)
         }
 
@@ -72,6 +72,29 @@ object YearPlans {
         val stored = plan.slotsBetween(monday, monday.plusDays(6))
         val slots = stored.ifEmpty { templateSlots(monday, shop) }
         return ShiftPlan(monday, 7, slots.sortedWith(ShiftPlan.ORDER))
+    }
+
+    /**
+     * Feiertage und kürzere Tage einer schon gespeicherten Woche, deren Schichten nicht mehr zu den
+     * Laden-Einstellungen passen (z. B. geplant, bevor es Feiertage gab, oder Feiertagszeit später geändert):
+     * andere Schichten als laut Vorlage, oder eine Schicht geht über den Feierabend hinaus.
+     * Von Hand geänderte Uhrzeiten innerhalb der Arbeitszeit zählen nicht.
+     */
+    fun outdatedDays(plan: YearPlan, monday: LocalDate, shop: ShopSettings): List<LocalDate> {
+        val last = monday.plusDays(6)
+        val stored = plan.slotsBetween(monday, last)
+        if (stored.isEmpty()) return emptyList()
+        val special = PlanSheet.dayNotes(shop, monday, last).keys
+        if (special.isEmpty()) return emptyList()
+        val fresh = templateSlots(monday, shop)
+        val config = shop.toConfig(monday, last)
+        return special.sorted().filter { day ->
+            val have = stored.filter { it.date == day }
+            val want = fresh.filter { it.date == day }
+            val close = config.hoursOn(day)?.close?.let { day.atTime(it) }
+            have.map { it.key }.toSet() != want.map { it.key }.toSet() ||
+                (close != null && have.any { it.end.isAfter(close) })
+        }
     }
 
     /**
@@ -155,7 +178,7 @@ object YearPlans {
         return PlanningRequest(
             firstDay = monday,
             days = 7,
-            shop = shop.toConfig(),
+            shop = shop.toConfig(monday, monday.plusDays(6)),
             employees = employees,
             absences = absences.filter { !it.date.isBefore(monday) && !it.date.isAfter(monday.plusDays(6)) },
             rules = rules,

@@ -66,8 +66,10 @@ class ShopTest {
     fun geschlossenerTagIstErlaubt() {
         val s = beispiel.copy(openingHours = beispiel.openingHours - SUNDAY)
         assertEquals(emptyList(), Shop.problems(s))
-        // Die Sonntags-Spätschicht hat dann keinen Tag mehr: Hinweis, kein Fehler.
-        assertTrue(Shop.warnings(s).any { it.contains("Spät So") })
+        // Die Sonntags-Spätschicht gilt dann nur noch an Feiertagen: kein Hinweis.
+        assertTrue(Shop.warnings(s).none { it.contains("Spät So") })
+        // Ist an Feiertagen auch zu, hat sie keinen Tag mehr: Hinweis, kein Fehler.
+        assertTrue(Shop.warnings(s.copy(holidayHours = null)).any { it.contains("Spät So") })
     }
 
     @Test
@@ -92,7 +94,7 @@ class ShopTest {
     fun ohneTageUndMitFalscherPersonenzahl() {
         assertEquals(
             listOf<ShopField>(ShopField.Template("neu", TemplatePart.DAYS)),
-            felder(mit(neu.copy(weekdays = emptySet()))),
+            felder(mit(neu.copy(weekdays = emptySet(), onHolidays = false))),
         )
         assertEquals(
             listOf<ShopField>(ShopField.Template("neu", TemplatePart.STAFF)),
@@ -176,7 +178,10 @@ class ShopTest {
     @Test
     fun hinweiseBeiOffenemTagOhneSchicht() {
         val s = beispiel.copy(templates = beispiel.templates.filter { it.id == "sp" })
-        assertEquals(listOf("Am So ist Arbeitszeit, aber keine Schicht vorgesehen."), Shop.warnings(s))
+        assertEquals(
+            listOf("Am So ist Arbeitszeit, aber keine Schicht vorgesehen.", "An Feiertagen ist Arbeitszeit, aber keine Schicht vorgesehen."),
+            Shop.warnings(s),
+        )
         assertTrue(Shop.warnings(s.copy(templates = emptyList())).single().contains("keine Schicht"))
         assertTrue(Shop.warnings(s.copy(openingHours = emptyMap())).single().contains("zu"))
     }
@@ -215,12 +220,108 @@ class ShopTest {
     }
 
     @Test
-    fun feiertageWieSonntag() {
+    fun beispielFeiertageWieSonntag() {
         val feiertag = LocalDate.of(2026, 12, 25) // Freitag
-        val config = beispiel.toConfig(holidays = setOf(feiertag))
+        val config = beispiel.toConfig(feiertag, feiertag)
         val schichten = ShiftCalendar.shifts(feiertag, 1, config)
         assertEquals(listOf("Früh 1", "Früh 2", "Spät So"), schichten.map { it.template.name })
         assertEquals(t(17, 30), schichten.last().end.toLocalTime())
+    }
+
+    @Test
+    fun reformationstagErkanntUndMitFeiertagszeit() {
+        val reformation = LocalDate.of(2025, 10, 31) // Freitag
+        val s = beispiel.copy(holidayHours = DayHours(t(6), t(12)))
+        // "Spät So" beginnt 12:00 und endet zum Feierabend 12:00: Das meldet Shop.problems vor dem Speichern.
+        assertTrue(Shop.problems(s).any { it.field == ShopField.Template("sp-so", TemplatePart.END) })
+        // Gültig machen: "Spät So" nicht an Feiertagen.
+        val ok = Shop.upsert(s, s.templates.first { it.id == "sp-so" }.copy(onHolidays = false))
+        assertEquals(emptyList(), Shop.problems(ok))
+        val feiertag = ShiftCalendar.shifts(reformation, 1, ok.toConfig(reformation, reformation))
+        assertEquals(listOf("Früh 1", "Früh 2"), feiertag.map { it.template.name })
+        assertEquals(t(11, 30), feiertag.first().end.toLocalTime())
+    }
+
+    @Test
+    fun inAnderemBundeslandIstReformationstagNormal() {
+        val tag = LocalDate.of(2025, 10, 31)
+        val bayern = beispiel.copy(state = FederalState.BY)
+        val schichten = ShiftCalendar.shifts(tag, 1, bayern.toConfig(tag, tag))
+        assertEquals(listOf("Früh 1", "Früh 2", "Spät"), schichten.map { it.template.name })
+    }
+
+    @Test
+    fun feiertagGeschlossen() {
+        val weihnachten = LocalDate.of(2026, 12, 25)
+        val zu = beispiel.copy(closedHolidays = setOf(HolidayId.WEIHNACHTEN_1))
+        assertEquals(emptyList(), ShiftCalendar.shifts(weihnachten, 1, zu.toConfig(weihnachten, weihnachten)))
+        // Der 2. Weihnachtstag bleibt offen.
+        assertEquals(3, ShiftCalendar.shifts(weihnachten.plusDays(1), 1, zu.toConfig(weihnachten, weihnachten.plusDays(1))).size)
+        // Ganz ohne Feiertags-Arbeitszeit: an allen Feiertagen zu.
+        val alleZu = beispiel.copy(holidayHours = null)
+        assertEquals(emptyList(), ShiftCalendar.shifts(weihnachten, 2, alleZu.toConfig(weihnachten, weihnachten.plusDays(1))))
+        assertEquals(emptyList(), Shop.problems(alleZu))
+    }
+
+    @Test
+    fun heiligabendUndSilvesterKuerzer() {
+        val heiligabend = LocalDate.of(2026, 12, 24) // Donnerstag
+        val schichten = ShiftCalendar.shifts(heiligabend, 1, beispiel.toConfig(heiligabend, heiligabend))
+        // Vorgabe bis 14:30: Früh unverändert, Spät 12:30–14:30.
+        assertEquals(listOf("Früh 1", "Früh 2", "Spät"), schichten.map { it.template.name })
+        assertEquals(t(14, 30), schichten.last().end.toLocalTime())
+
+        // Feierabend 12:00: Früh 2 wird gekürzt, Spät fällt weg.
+        val frueh = beispiel.copy(shortDays = mapOf(ShortDay.HEILIGABEND to DayHours(t(4, 30), t(12))))
+        val kurz = ShiftCalendar.shifts(heiligabend, 1, frueh.toConfig(heiligabend, heiligabend))
+        assertEquals(listOf("Früh 1", "Früh 2"), kurz.map { it.template.name })
+        assertEquals(t(12), kurz.last().end.toLocalTime())
+
+        // Feierabend 13:00: Spät bliebe nur 30 min, fällt weg.
+        val rest = beispiel.copy(shortDays = mapOf(ShortDay.HEILIGABEND to DayHours(t(4, 30), t(13))))
+        assertEquals(listOf("Früh 1", "Früh 2"), ShiftCalendar.shifts(heiligabend, 1, rest.toConfig(heiligabend, heiligabend)).map { it.template.name })
+
+        // Ausgeschaltet: wie ein normaler Donnerstag.
+        val normal = beispiel.copy(shortDays = emptyMap())
+        val voll = ShiftCalendar.shifts(heiligabend, 1, normal.toConfig(heiligabend, heiligabend))
+        assertEquals(t(18, 30), voll.last().end.toLocalTime())
+
+        // Silvester auch, über den Jahreswechsel gerechnet.
+        val silvester = LocalDate.of(2026, 12, 31)
+        val wechsel = ShiftCalendar.shifts(silvester, 2, beispiel.toConfig(silvester, silvester.plusDays(1)))
+        assertEquals(t(14, 30), wechsel.filter { it.date == silvester }.maxOf { it.end }.toLocalTime())
+        // Neujahr ist Feiertag: Sonntagsschichten.
+        assertEquals(listOf("Früh 1", "Früh 2", "Spät So"), wechsel.filter { it.date == silvester.plusDays(1) }.map { it.template.name })
+    }
+
+    @Test
+    fun kuerzererTagAnFreiemWochentagBleibtFrei() {
+        val heiligabend = LocalDate.of(2026, 12, 24) // Donnerstag
+        val s = beispiel.copy(openingHours = beispiel.openingHours - DayOfWeek.THURSDAY)
+        assertEquals(emptyList(), ShiftCalendar.shifts(heiligabend, 1, s.toConfig(heiligabend, heiligabend)))
+    }
+
+    @Test
+    fun feiertagsZeitenWerdenGeprueft() {
+        val falsch = beispiel.copy(holidayHours = DayHours(t(12), t(6)))
+        assertTrue(ShopField.HolidayHours in felder(falsch))
+        val kurzFalsch = beispiel.copy(shortDays = mapOf(ShortDay.SILVESTER to DayHours(t(14), t(14))))
+        assertTrue(ShopField.Short(ShortDay.SILVESTER) in felder(kurzFalsch))
+        // Schicht nur an Feiertagen ist erlaubt.
+        val nurFeiertag = mit(neu.copy(weekdays = emptySet(), onHolidays = true))
+        assertEquals(emptyList(), Shop.problems(nurFeiertag))
+        val nirgends = mit(neu.copy(weekdays = emptySet(), onHolidays = false))
+        assertTrue(ShopField.Template("neu", TemplatePart.DAYS) in felder(nirgends))
+    }
+
+    @Test
+    fun feiertagsHinweise() {
+        val ohne = beispiel.copy(templates = beispiel.templates.map { it.copy(onHolidays = false) })
+        assertTrue(Shop.warnings(ohne).any { it.contains("Feiertagen") })
+        val vorschau = Shop.preview(beispiel.templates.first { it.id == "f1" }, beispiel.openingHours, beispiel.holidayHours)
+        assertEquals(listOf("täglich 04:30–11:30", "Feiertag 04:30–11:30"), vorschau)
+        assertEquals("12:30–14:30", Shop.shortDayTimes(beispiel.templates.first { it.id == "sp" }, DayHours(t(4, 30), t(14, 30))))
+        assertEquals(null, Shop.shortDayTimes(beispiel.templates.first { it.id == "sp" }, DayHours(t(4, 30), t(12, 30))))
     }
 
     @Test
@@ -245,7 +346,7 @@ class ShopTest {
         val request = PlanningRequest(
             firstDay = LocalDate.of(2026, 11, 2),
             days = s.planDays,
-            shop = s.toConfig(),
+            shop = s.toConfig(LocalDate.of(2026, 11, 2), LocalDate.of(2026, 11, 29)),
             employees = Team.EXAMPLE,
         )
         val plan = Planner.plan(request)

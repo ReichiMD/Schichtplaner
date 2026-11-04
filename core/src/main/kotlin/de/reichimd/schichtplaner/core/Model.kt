@@ -30,7 +30,8 @@ sealed interface ShiftStart {
 
 /**
  * Schichtvorlage, z. B. "Früh 1" 04:30–11:30 oder "Spät" 12:30 bis 30 min nach Ladenschluss.
- * [weekdays] legt fest, an welchen Tagen die Vorlage gebraucht wird (Feiertage zählen wie [holidayLike]).
+ * [weekdays] legt fest, an welchen Tagen die Vorlage gebraucht wird, [onHolidays], ob auch an Feiertagen
+ * (dann zählt der Wochentag nicht).
  */
 data class ShiftTemplate(
     val id: String,
@@ -46,13 +47,30 @@ data class ShiftTemplate(
 /** Einstellungen des Ladens. Alles davon stellt die Filialleitung in der App ein. */
 data class ShopConfig(
     val openingHours: Map<DayOfWeek, OpeningHours>,
+    /** Arbeitszeit an Feiertagen, null = an Feiertagen zu. */
     val holidayHours: OpeningHours?,
     val holidays: Set<LocalDate> = emptySet(),
     val templates: List<ShiftTemplate>,
+    /** Feiertage, an denen der Laden trotz [holidayHours] zu ist. */
+    val closedDays: Set<LocalDate> = emptySet(),
+    /**
+     * Kürzere Tage (z. B. Heiligabend): eigene Arbeitszeit, Schichten wie an diesem Wochentag. Schichten, die
+     * länger gehen, enden zum Feierabend; Schichten, die erst danach beginnen würden, fallen weg.
+     * Wird an dem Wochentag gar nicht gearbeitet, bleibt der Tag frei.
+     */
+    val shortDays: Map<LocalDate, OpeningHours> = emptyMap(),
 ) {
-    /** Öffnungszeit an einem Datum, oder null wenn geschlossen. */
-    fun hoursOn(date: LocalDate): OpeningHours? =
-        if (date in holidays) holidayHours else openingHours[date.dayOfWeek]
+    /** Arbeitszeit an einem Datum, oder null wenn nicht gearbeitet wird. */
+    fun hoursOn(date: LocalDate): OpeningHours? = when {
+        date in closedDays -> null
+        date in holidays -> holidayHours
+        openingHours[date.dayOfWeek] == null -> null
+        else -> shortDays[date] ?: openingHours[date.dayOfWeek]
+    }
+
+    fun isHoliday(date: LocalDate): Boolean = date in holidays
+
+    fun isShortDay(date: LocalDate): Boolean = date !in holidays && date in shortDays
 }
 
 data class Employee(
