@@ -277,6 +277,10 @@ class ShopTest {
         assertEquals(listOf("Früh 1", "Früh 2"), kurz.map { it.template.name })
         assertEquals(t(12), kurz.last().end.toLocalTime())
 
+        // Feierabend 13:00: Spät bliebe nur 30 min, fällt weg.
+        val rest = beispiel.copy(shortDays = mapOf(ShortDay.HEILIGABEND to DayHours(t(4, 30), t(13))))
+        assertEquals(listOf("Früh 1", "Früh 2"), ShiftCalendar.shifts(heiligabend, 1, rest.toConfig(heiligabend, heiligabend)).map { it.template.name })
+
         // Ausgeschaltet: wie ein normaler Donnerstag.
         val normal = beispiel.copy(shortDays = emptyMap())
         val voll = ShiftCalendar.shifts(heiligabend, 1, normal.toConfig(heiligabend, heiligabend))

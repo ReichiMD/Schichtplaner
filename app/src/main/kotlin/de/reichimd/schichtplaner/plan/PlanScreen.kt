@@ -251,6 +251,7 @@ internal fun PlanScreen(
     val hinweise = remember(plan, montag, shop, alle, abwesend) { YearPlans.warnings(plan, montag, shop, alle, abwesend) }
     val zeilen = remember(alle, woche) { YearPlans.rows(alle, woche) }
     val besondereTage = remember(montag, shop) { PlanSheet.dayNotes(shop, montag, montag.plusDays(6)) }
+    val veraltet = remember(plan, montag, shop) { YearPlans.outdatedDays(plan, montag, shop) }
 
     fun ausfuellen() = vm.ausfuellen(montag, teamStore, ladenStore, wuenscheStore, planStore)
     fun aendern(tag: LocalDate, wie: (ShiftPlan) -> ShiftPlan) = planStore.woche(YearPlans.monday(tag), shop, wie)
@@ -387,6 +388,13 @@ internal fun PlanScreen(
 
         Zusammenfassung(woche, alleIds, hinweise)
         BesondereTage(besondereTage)
+        if (veraltet.isNotEmpty()) {
+            Hinweis(
+                "Am ${veraltet.joinToString(", ") { tagText(it) }} passen die Schichten nicht zu den Feiertags-Einstellungen " +
+                    "(z. B. vor dem Update geplant). Von Hand anpassen, oder „Leeren“ und neu ausfüllen.",
+                Modifier.padding(horizontal = 8.dp).testTag("feiertage-veraltet"),
+            )
+        }
         Wochenblatt(
             wochen = wochen,
             wocheVon = { YearPlans.week(plan, it, shop) },

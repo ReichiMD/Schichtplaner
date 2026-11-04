@@ -113,11 +113,11 @@ object Holidays {
             Triple(HolidayId.DREI_KOENIGE, LocalDate.of(year, 1, 6), only(FederalState.BW, FederalState.BY, FederalState.ST)),
             Triple(HolidayId.FRAUENTAG, LocalDate.of(year, 3, 8), only(FederalState.BE, FederalState.MV)),
             Triple(HolidayId.KARFREITAG, easter.minusDays(2), S),
-            Triple(HolidayId.OSTERSONNTAG, easter, only(FederalState.BB)),
+            Triple(HolidayId.OSTERSONNTAG, easter, only(FederalState.BB, FederalState.HE)),
             Triple(HolidayId.OSTERMONTAG, easter.plusDays(1), S),
             Triple(HolidayId.TAG_DER_ARBEIT, LocalDate.of(year, 5, 1), S),
             Triple(HolidayId.HIMMELFAHRT, easter.plusDays(39), S),
-            Triple(HolidayId.PFINGSTSONNTAG, easter.plusDays(49), only(FederalState.BB)),
+            Triple(HolidayId.PFINGSTSONNTAG, easter.plusDays(49), only(FederalState.BB, FederalState.HE)),
             Triple(HolidayId.PFINGSTMONTAG, easter.plusDays(50), S),
             Triple(
                 HolidayId.FRONLEICHNAM, easter.plusDays(60),

@@ -137,7 +137,8 @@ object PlanPrint {
                 val n = notes[d]
                 when {
                     n == null || !PlanSheet.inPlan(plan, d) -> ""
-                    n.closed -> "${n.label} (zu)"
+                    // "zu" vorn, damit es beim Kürzen langer Namen nicht verloren geht.
+                    n.closed -> "zu: ${n.label}"
                     else -> n.label
                 }
             },

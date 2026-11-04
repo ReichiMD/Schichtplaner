@@ -374,7 +374,7 @@ object Shop {
         var (start, end) = ShiftCalendar.times(template, date, OpeningHours(hours.open, hours.close))
         val close = date.atTime(hours.close)
         if (end.isAfter(close)) end = close
-        if (start.toLocalDate() != date || !end.isAfter(start)) return null
+        if (start.toLocalDate() != date || Duration.between(start, end).toMinutes() < ShiftCalendar.MIN_SHORT_DAY_MINUTES) return null
         return "${format(start.toLocalTime())}–${format(end.toLocalTime())}"
     }
 

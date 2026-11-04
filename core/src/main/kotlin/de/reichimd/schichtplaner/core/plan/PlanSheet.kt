@@ -86,7 +86,10 @@ object PlanSheet {
         var d = first
         while (!d.isAfter(last)) {
             val short = ShortDay.on(d)
-            if (short != null && short in shop.shortDays && d !in notes) notes[d] = DayNote(short.label, holiday = false)
+            // Nur wenn an dem Wochentag überhaupt gearbeitet wird, sonst ist der Tag ohnehin frei.
+            if (short != null && short in shop.shortDays && d !in notes && d.dayOfWeek in shop.openingHours) {
+                notes[d] = DayNote(short.label, holiday = false)
+            }
             d = d.plusDays(1)
         }
         return notes

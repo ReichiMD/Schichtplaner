@@ -75,6 +75,29 @@ object YearPlans {
     }
 
     /**
+     * Feiertage und kürzere Tage einer schon gespeicherten Woche, deren Schichten nicht mehr zu den
+     * Laden-Einstellungen passen (z. B. geplant, bevor es Feiertage gab, oder Feiertagszeit später geändert):
+     * andere Schichten als laut Vorlage, oder eine Schicht geht über den Feierabend hinaus.
+     * Von Hand geänderte Uhrzeiten innerhalb der Arbeitszeit zählen nicht.
+     */
+    fun outdatedDays(plan: YearPlan, monday: LocalDate, shop: ShopSettings): List<LocalDate> {
+        val last = monday.plusDays(6)
+        val stored = plan.slotsBetween(monday, last)
+        if (stored.isEmpty()) return emptyList()
+        val special = PlanSheet.dayNotes(shop, monday, last).keys
+        if (special.isEmpty()) return emptyList()
+        val fresh = templateSlots(monday, shop)
+        val config = shop.toConfig(monday, last)
+        return special.sorted().filter { day ->
+            val have = stored.filter { it.date == day }
+            val want = fresh.filter { it.date == day }
+            val close = config.hoursOn(day)?.close?.let { day.atTime(it) }
+            have.map { it.key }.toSet() != want.map { it.key }.toSet() ||
+                (close != null && have.any { it.end.isAfter(close) })
+        }
+    }
+
+    /**
      * Mehrere Wochen ab [monday] in einem Plan (für Prüfung über Wochengrenzen und für das PDF).
      * Höchstens [PlanningRequest.MAX_DAYS] Tage.
      */

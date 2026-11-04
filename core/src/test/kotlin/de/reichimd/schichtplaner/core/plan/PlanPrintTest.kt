@@ -155,6 +155,29 @@ class PlanPrintTest {
         assertTrue(notes.getValue(montag.plusDays(4)).closed)
         val woche = YearPlans.week(YearPlan.EMPTY, montag, shop)
         assertTrue(woche.slotsOn(montag.plusDays(4)).isEmpty())
-        assertEquals("1. Weihnachtstag (zu)", PlanPrint.week(woche, team, emptyList(), 0, notes).notes[4])
+        assertEquals("zu: 1. Weihnachtstag", PlanPrint.week(woche, team, emptyList(), 0, notes).notes[4])
+    }
+
+    @Test
+    fun alteWocheOhneFeiertageWirdErkannt() {
+        val shop = de.reichimd.schichtplaner.core.shop.Shop.EXAMPLE
+        val montag = LocalDate.of(2026, 12, 21)
+        // So, wie die Woche früher ohne Feiertage gespeichert worden wäre: normale Wochentage.
+        val alt = de.reichimd.schichtplaner.core.ShiftCalendar.shifts(
+            montag, 7,
+            de.reichimd.schichtplaner.core.ShopConfig(
+                openingHours = shop.openingHours.mapValues { (_, h) -> de.reichimd.schichtplaner.core.OpeningHours(h.open, h.close) },
+                holidayHours = null,
+                templates = shop.templates,
+            ),
+        ).map { PlanSlot(SlotKey(it.date, it.template.id, it.slot), it.template.name, it.kind, it.start, it.end, null) }
+        val gespeichert = YearPlan(alt.map { if (it.date == montag) it.copy(employeeId = "a") else it })
+        // Heiligabend (Spät bis 18:30 statt 14:30), 25.12. (kein "Spät So"), 26.12. (Sa: "Spät" statt "Spät So").
+        assertEquals(listOf(montag.plusDays(3), montag.plusDays(4), montag.plusDays(5)), YearPlans.outdatedDays(gespeichert, montag, shop))
+        // Neu aus den Vorlagen: passt.
+        val neu = YearPlan(YearPlans.templateSlots(montag, shop).map { if (it.date == montag) it.copy(employeeId = "a") else it })
+        assertEquals(emptyList(), YearPlans.outdatedDays(neu, montag, shop))
+        // Nicht gespeichert: nichts zu melden.
+        assertEquals(emptyList(), YearPlans.outdatedDays(YearPlan.EMPTY, montag, shop))
     }
 }

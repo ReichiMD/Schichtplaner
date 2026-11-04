@@ -54,6 +54,7 @@ class HolidaysTest {
         assertTrue(hat(FederalState.SL, HolidayId.MARIAE_HIMMELFAHRT))
         assertTrue(hat(FederalState.BB, HolidayId.OSTERSONNTAG))
         assertFalse(hat(FederalState.ST, HolidayId.OSTERSONNTAG))
+        assertTrue(hat(FederalState.HE, HolidayId.PFINGSTSONNTAG))
         // Buß- und Bettag: Mittwoch vor dem 23.11.
         assertEquals(d(2026, 11, 18), Holidays.of(2026, FederalState.SN).first { it.id == HolidayId.BUSS_UND_BETTAG }.date)
         assertEquals(d(2028, 11, 22), Holidays.of(2028, FederalState.SN).first { it.id == HolidayId.BUSS_UND_BETTAG }.date)
