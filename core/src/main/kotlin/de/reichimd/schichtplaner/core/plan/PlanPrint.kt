@@ -1,6 +1,7 @@
 package de.reichimd.schichtplaner.core.plan
 
 import de.reichimd.schichtplaner.core.Absence
+import de.reichimd.schichtplaner.core.AbsenceType
 import de.reichimd.schichtplaner.core.Employee
 import de.reichimd.schichtplaner.core.ShiftKind
 import de.reichimd.schichtplaner.core.Weekdays
@@ -16,6 +17,8 @@ data class PrintCell(
     val kind: ShiftKind? = null,
     /** false: Tag liegt außerhalb des Plans (z. B. Rest der letzten Woche), wird grau. */
     val inPlan: Boolean = true,
+    /** true: freier Tag, den sich die Person gewünscht hat ("Fr" farbig hinterlegt). */
+    val wish: Boolean = false,
 )
 
 sealed interface PrintRow {
@@ -39,7 +42,8 @@ data class PrintWeek(
 
 /**
  * Inhalt des PDF-Exports, reines Kotlin und damit ohne Handy testbar. Gezeichnet wird in der App.
- * Gedruckt wird nur, was das Team braucht: Zeiten, Pause, Stunden und die Kürzel U, K, Fr.
+ * Gedruckt wird nur, was das Team braucht: Zeiten, Pause, Stunden und die Kürzel U, K, Fr
+ * (jeder freie Tag ist "Fr", ein erfüllter Frei-Wunsch farbig hinterlegt).
  * Warnungen (⚠, nicht erfüllte Wünsche) gehören nicht aufs Blatt im Laden.
  */
 object PlanPrint {
@@ -47,6 +51,7 @@ object PlanPrint {
     const val BACKUP_SECTION = "Verk. aus and. Fil."
     const val TOTALS_LABEL = "ges. Stunden"
     const val OPEN_LABEL = "offen"
+    const val FREE = "Fr"
 
     private val DAY = DateTimeFormatter.ofPattern("dd.MM.")
     private val DAY_YEAR = DateTimeFormatter.ofPattern("dd.MM.yyyy")
@@ -64,8 +69,7 @@ object PlanPrint {
             cells = days.map { d ->
                 when {
                     !PlanSheet.inPlan(plan, d) -> PrintCell("", inPlan = false)
-                    else -> plan.slotsOf(e.id, d).firstOrNull()?.let { cell(it) }
-                        ?: PrintCell(absent[e.id to d]?.let { Wishes.code(it) } ?: "")
+                    else -> plan.slotsOf(e.id, d).firstOrNull()?.let { cell(it) } ?: free(absent[e.id to d], e.isBackup)
                 }
             },
             hours = PlanSheet.hours(PlanSheet.paidMinutes(plan, e.id, week)),
@@ -115,6 +119,16 @@ object PlanPrint {
             days = days.map { "${Weekdays.short(it.dayOfWeek)} ${it.format(DAY)}" },
             rows = rows,
         )
+    }
+
+    /**
+     * Tag ohne Schicht: U oder K aus dem Kalender, sonst "Fr" (farbig, wenn es ein Frei-Wunsch war).
+     * Aushilfen aus anderen Filialen ohne Eintrag bleiben leer, sie sind ja nicht unser "Frei".
+     */
+    fun free(absence: AbsenceType?, backup: Boolean = false): PrintCell = when (absence) {
+        null -> PrintCell(if (backup) "" else FREE)
+        AbsenceType.DAY_OFF_WISH -> PrintCell(FREE, wish = true)
+        else -> PrintCell(Wishes.code(absence))
     }
 
     /** "4:30–11:30" und darunter "P 0,5 · 6,5" bzw. nur "6". */

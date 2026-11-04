@@ -70,6 +70,7 @@ import de.reichimd.schichtplaner.core.ShiftKind
 import de.reichimd.schichtplaner.core.Weekdays
 import de.reichimd.schichtplaner.core.plan.PlanCheck
 import de.reichimd.schichtplaner.core.plan.PlanEdit
+import de.reichimd.schichtplaner.core.plan.PlanPrint
 import de.reichimd.schichtplaner.core.plan.PlanSheet
 import de.reichimd.schichtplaner.core.plan.PlanSlot
 import de.reichimd.schichtplaner.core.plan.Severity
@@ -90,6 +91,8 @@ import de.reichimd.schichtplaner.ui.Fehler
 import de.reichimd.schichtplaner.ui.FehlerHell
 import de.reichimd.schichtplaner.ui.FehlerText
 import de.reichimd.schichtplaner.ui.FreiWunsch
+import de.reichimd.schichtplaner.ui.WunschErfuellt
+import de.reichimd.schichtplaner.ui.WunschErfuelltHell
 import de.reichimd.schichtplaner.ui.Frueh
 import de.reichimd.schichtplaner.ui.Hintergrund
 import de.reichimd.schichtplaner.ui.Hinweis
@@ -743,7 +746,9 @@ private fun SchichtZelle(
     }
     val regel = hinweise.any { it.severity == Severity.RULE }
     val wunsch = hinweise.any { it.severity == Severity.WISH }
+    val freiWunsch = schicht == null && abwesend == AbsenceType.DAY_OFF_WISH
     val farbe = when {
+        freiWunsch -> WunschErfuelltHell
         schicht == null -> Color.White
         regel -> FehlerHell
         schicht.kind == ShiftKind.EARLY -> Frueh
@@ -754,6 +759,7 @@ private fun SchichtZelle(
         append(
             when {
                 schicht != null -> "${schicht.name} ${zeitText(schicht)}, ${PlanSheet.hours(schicht.paidMinutes)} Stunden"
+                freiWunsch -> "frei (Frei-Wunsch)"
                 abwesend != null -> Wishes.label(abwesend)
                 else -> "frei"
             },
@@ -763,7 +769,16 @@ private fun SchichtZelle(
     Column(
         modifier
             .background(farbe, form)
-            .border(if (regel) 2.dp else 1.dp, if (regel) Fehler else if (schicht == null) Rand else farbe, form)
+            .border(
+                if (regel || freiWunsch) 2.dp else 1.dp,
+                when {
+                    regel -> Fehler
+                    freiWunsch -> WunschErfuellt
+                    schicht == null -> Rand
+                    else -> farbe
+                },
+                form,
+            )
             .clickable(enabled = aenderbar, role = Role.Button, onClick = antippen)
             .semantics(mergeDescendants = true) { contentDescription = beschreibung }
             .padding(vertical = 2.dp)
@@ -772,12 +787,18 @@ private fun SchichtZelle(
         verticalArrangement = Arrangement.Center,
     ) {
         if (schicht == null) {
+            // Wie auf dem Papier: jeder freie Tag "Fr", ein Frei-Wunsch grün hinterlegt.
+            val zelle = PlanPrint.free(abwesend, person.isBackup)
             Text(
-                abwesend?.let { Wishes.code(it) } ?: "frei",
-                fontSize = if (abwesend != null) 13.sp else 10.sp,
+                zelle.top,
+                fontSize = 13.sp,
                 lineHeight = ZELLE_ZEILENHOEHE,
                 fontWeight = if (abwesend != null) FontWeight.Bold else FontWeight.Normal,
-                color = if (abwesend != null) Schrift else TextLeise,
+                color = when {
+                    freiWunsch -> WunschErfuellt
+                    abwesend != null -> Schrift
+                    else -> TextLeise
+                },
             )
         } else {
             Text(PlanSheet.time(schicht.start), fontSize = 10.sp, lineHeight = ZELLE_ZEILENHOEHE, fontWeight = FontWeight.Bold, color = Schrift, maxLines = 1)
@@ -838,7 +859,8 @@ private fun Legende() {
             Eintrag(Frueh, "Früh")
             Eintrag(Spaet, "Spät")
             Eintrag(FehlerHell, "⚠ Regel verletzt")
-            Text("Fr = Frei-Wunsch nicht erfüllt", fontSize = 12.sp, color = FreiWunsch)
+            Eintrag(WunschErfuelltHell, "Fr = Frei-Wunsch erfüllt")
+            Text("Fr in einer Schicht = Frei-Wunsch nicht erfüllt", fontSize = 12.sp, color = FreiWunsch)
             Text("P = Pause", fontSize = 12.sp, color = TextMittel)
             Text("U Urlaub · K krank", fontSize = 12.sp, color = TextMittel)
         }

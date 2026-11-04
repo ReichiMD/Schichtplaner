@@ -59,14 +59,17 @@ class PlanPrintTest {
         val zeilen = w.rows.filterIsInstance<PrintRow.Person>().associateBy { it.name }
         val a = zeilen.getValue("Anna")
         assertEquals(PrintCell("4:30–11:30", "P 0,5 · 6,5", ShiftKind.EARLY), a.cells[0])
-        assertEquals(PrintCell("Fr"), a.cells[1]) // Frei-Wunsch ohne Schicht
+        assertEquals(PrintCell("Fr", wish = true), a.cells[1]) // Frei-Wunsch erfüllt: farbig
         assertEquals(PrintCell("K"), a.cells[2])
-        assertEquals(PrintCell(""), a.cells[3]) // frei ohne Eintrag: leer
+        assertEquals(PrintCell("Fr"), a.cells[3]) // frei ohne Eintrag: normales Fr
         assertEquals("6,5", a.hours)
 
         val b = zeilen.getValue("Ben")
         assertEquals(PrintCell("12:30–18:30", "6", ShiftKind.LATE), b.cells[0])
         assertEquals(PrintCell("U"), b.cells[1])
+
+        // Aushilfe aus anderer Filiale ohne Eintrag: leer statt "Fr".
+        assertEquals(PrintCell(""), zeilen.getValue("Hanna").cells[0])
         assertEquals("6", b.hours)
     }
 

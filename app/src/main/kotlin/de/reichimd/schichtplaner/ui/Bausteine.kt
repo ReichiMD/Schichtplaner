@@ -56,6 +56,10 @@ internal val FehlerHell = Color(0xFFFDECEA)
 internal val Urlaub = Color(0xFF6E4FA0)
 internal val FreiWunsch = Color(0xFF2F6CB0)
 internal val FreiWunschHell = Color(0xFFDCE9F7)
+
+// Im Plan: Frei-Wunsch erfüllt. Grün (nicht blau wie der Spätdienst), mit Rahmen auch ohne Farbe erkennbar.
+internal val WunschErfuellt = Color(0xFF1B5E20)
+internal val WunschErfuelltHell = Color(0xFFDDEFD8)
 internal val Krank = Color(0xFFA23B2E)
 internal val KrankHell = Color(0xFFF6DEDA)
 
