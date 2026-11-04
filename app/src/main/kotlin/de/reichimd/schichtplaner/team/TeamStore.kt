@@ -53,8 +53,19 @@ internal class TeamStore(dir: File) {
         datei.aendern { Team.move(it, id, hoch) }
     }
 
-    fun loeschen(id: String) {
-        datei.aendern { Team.remove(it, id) }
+    /** Person scheidet aus: nicht mehr eingeplant, bleibt aber in alten Wochen stehen (siehe [Team.archive]). */
+    fun ausscheiden(id: String) {
+        datei.aendern { Team.archive(it, id) }
+    }
+
+    /** Ausgeschiedene Person zurück ins Team. Gibt eine Meldung zurück, wenn es nicht geht, sonst null. */
+    fun zurueckholen(id: String): String? {
+        val z = zustand.value
+        if (!z.bearbeitbar) return "Die Teamliste ist gerade nicht bearbeitbar."
+        val e = z.team.firstOrNull { it.id == id && it.archived } ?: return null
+        Team.problems(e.copy(archived = false), z.team).firstOrNull()?.let { return it.message }
+        datei.aendern { Team.restore(it, id) }
+        return null
     }
 
     /** Beispiel-Team, nur solange das Team leer ist. Neue IDs, damit nichts mit Alt-Daten kollidiert. */

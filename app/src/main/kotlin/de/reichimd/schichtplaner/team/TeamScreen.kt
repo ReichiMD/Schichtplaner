@@ -81,12 +81,11 @@ import de.reichimd.schichtplaner.ui.Schalter
 import de.reichimd.schichtplaner.ui.Schrift
 import de.reichimd.schichtplaner.ui.Spaet
 import de.reichimd.schichtplaner.ui.Stepper
+import de.reichimd.schichtplaner.ui.FehlerText
 import de.reichimd.schichtplaner.ui.TextLeise
 import de.reichimd.schichtplaner.ui.TextMittel
 import de.reichimd.schichtplaner.core.team.Team
-import de.reichimd.schichtplaner.core.wishes.Wishes
 import de.reichimd.schichtplaner.wuensche.WuenscheStore
-import de.reichimd.schichtplaner.wuensche.eintraege
 import kotlinx.coroutines.launch
 import java.time.DayOfWeek
 import java.util.UUID
@@ -113,9 +112,9 @@ internal fun TeamBereich(
     if (id == null) {
         TeamListe(zustand, store, oeffnen = { offen = it })
     } else {
-        val vorhanden = zustand.team.firstOrNull { it.id == id }
+        val vorhanden = zustand.team.firstOrNull { it.id == id && !it.archived }
         if (id != NEU && vorhanden == null) {
-            // Gelöscht oder nicht mehr da: zurück zur Liste. Während des Ladens (nach Neustart) noch warten.
+            // Ausgeschieden oder nicht mehr da: zurück zur Liste. Während des Ladens (nach Neustart) noch warten.
             if (!zustand.laedt) LaunchedEffect(id) { offen = null }
             return
         }
@@ -131,6 +130,9 @@ internal fun TeamBereich(
 
 @Composable
 private fun TeamListe(zustand: TeamZustand, store: TeamStore, oeffnen: (String) -> Unit) {
+    val aktiv = Team.active(zustand.team)
+    val ehemalige = zustand.team.filter { it.archived }
+    var zurueckFehler by remember { mutableStateOf<String?>(null) }
     Column(Modifier.fillMaxSize()) {
         Row(
             Modifier
@@ -161,7 +163,7 @@ private fun TeamListe(zustand: TeamZustand, store: TeamStore, oeffnen: (String) 
             zustand.laedt -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = Akzent)
             }
-            zustand.team.isEmpty() -> LeeresTeam(
+            aktiv.isEmpty() && ehemalige.isEmpty() -> LeeresTeam(
                 bearbeitbar = zustand.bearbeitbar,
                 neu = { oeffnen(NEU) },
                 beispiel = store::beispielLaden,
@@ -178,14 +180,42 @@ private fun TeamListe(zustand: TeamZustand, store: TeamStore, oeffnen: (String) 
                         color = TextLeise,
                     )
                 }
-                itemsIndexed(zustand.team, key = { _, e -> e.id }) { i, e ->
+                itemsIndexed(aktiv, key = { _, e -> e.id }) { i, e ->
                     MitarbeiterZeile(
                         e,
                         enabled = zustand.bearbeitbar,
                         erste = i == 0,
-                        letzte = i == zustand.team.lastIndex,
+                        letzte = i == aktiv.lastIndex,
                         verschieben = { hoch -> store.verschieben(e.id, hoch) },
                     ) { oeffnen(e.id) }
+                }
+                if (ehemalige.isNotEmpty()) {
+                    item {
+                        Column(Modifier.padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Ausgeschieden", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Schrift)
+                            Text(
+                                "Werden nicht mehr eingeplant, stehen aber weiter in den Wochen, in denen sie gearbeitet haben.",
+                                fontSize = 13.sp,
+                                color = TextLeise,
+                            )
+                            zurueckFehler?.let { FehlerText(it) }
+                        }
+                    }
+                    itemsIndexed(ehemalige, key = { _, e -> "alt-" + e.id }) { _, e ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .testTag("ehemalig-${e.id}"),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(e.name, fontSize = 16.sp, color = TextMittel, modifier = Modifier.weight(1f))
+                            TextButton(
+                                onClick = { zurueckFehler = store.zurueckholen(e.id) },
+                                enabled = zustand.bearbeitbar,
+                                modifier = Modifier.testTag("zurueck-${e.id}"),
+                            ) { Text("Zurück ins Team", color = Akzent) }
+                        }
+                    }
                 }
             }
         }
@@ -493,7 +523,7 @@ private fun MitarbeiterBearbeiten(
 
             if (original != null) {
                 TextButton(onClick = { loeschenFrage = true }, modifier = Modifier.fillMaxWidth()) {
-                    Text("${original.name} aus dem Team löschen", color = Akzent)
+                    Text("${original.name} scheidet aus", color = Akzent)
                 }
             }
         }
@@ -539,32 +569,22 @@ private fun MitarbeiterBearbeiten(
         )
     }
     if (loeschenFrage && original != null) {
-        val eintraege by wuensche.zustand.collectAsState()
-        val anzahl = Wishes.ofEmployee(eintraege.eintraege, original.id).size
-        // Ist der Kalender gesperrt, bleiben die Einträge in der Datei, werden aber nirgends mehr genutzt.
-        val kalenderOk = eintraege.bearbeitbar
         AlertDialog(
             onDismissRequest = { loeschenFrage = false },
-            title = { Text("${original.name} löschen?") },
+            title = { Text("${original.name} scheidet aus?") },
             text = {
                 Text(
-                    "${original.name} wird aus dem Team entfernt und nicht mehr eingeplant." +
-                        when {
-                            !kalenderOk -> ""
-                            anzahl == 0 -> ""
-                            anzahl == 1 -> " Der eine eingetragene Tag im Wünsche-Kalender wird mitgelöscht."
-                            else -> " Die $anzahl eingetragenen Tage im Wünsche-Kalender werden mitgelöscht."
-                        },
+                    "${original.name} wird nicht mehr eingeplant und steht nicht mehr im Team. " +
+                        "In den Wochen, in denen ${original.name} gearbeitet hat, bleibt der Name stehen, " +
+                        "auch die Einträge im Wünsche-Kalender bleiben. Unten unter „Ausgeschieden“ lässt sich das rückgängig machen.",
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
                     loeschenFrage = false
-                    // Erst die Kalendereinträge, dann die Person: so bleibt nie etwas ohne Besitzer zurück.
-                    wuensche.personEntfernen(original.id)
-                    store.loeschen(original.id)
+                    store.ausscheiden(original.id)
                     schliessen()
-                }) { Text("Löschen", color = Akzent) }
+                }, modifier = Modifier.testTag("ausscheiden")) { Text("Ausscheiden", color = Akzent) }
             },
             dismissButton = { TextButton(onClick = { loeschenFrage = false }) { Text("Abbrechen", color = Schrift) } },
         )

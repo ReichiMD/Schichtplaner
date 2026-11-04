@@ -9,16 +9,19 @@ import de.reichimd.schichtplaner.core.plan.PlanCodec
 import de.reichimd.schichtplaner.core.plan.PlanSlot
 import de.reichimd.schichtplaner.core.plan.ShiftPlan
 import de.reichimd.schichtplaner.core.plan.SlotKey
+import de.reichimd.schichtplaner.core.plan.YearPlan
 import de.reichimd.schichtplaner.core.shop.Shop
 import de.reichimd.schichtplaner.core.storage.DataFileException
 import de.reichimd.schichtplaner.core.storage.DataFileTooNewException
 import de.reichimd.schichtplaner.core.team.TeamCodec
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
 import java.time.LocalDate
 import java.time.LocalDateTime
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class BackupTest {
@@ -41,7 +44,7 @@ class BackupTest {
         shop = Shop.EXAMPLE.copy(planWeeks = 4),
         // Sortiert nach Datum und Person, wie der Kalender sie speichert.
         wishes = listOf(Absence("b", mo, AbsenceType.DAY_OFF_WISH), Absence("a", mo.plusDays(2), AbsenceType.VACATION)),
-        plan = plan,
+        plan = YearPlan.of(plan),
         created = LocalDateTime.of(2026, 11, 3, 22, 15, 7),
         appVersion = "0.1.8",
     )
@@ -53,15 +56,15 @@ class BackupTest {
 
     @Test
     fun ohnePlanUndOhneZeitstempel() {
-        val ohne = daten.copy(plan = null, created = null, appVersion = null)
+        val ohne = daten.copy(plan = YearPlan.EMPTY, created = null, appVersion = null)
         val zurueck = BackupCodec.decode(BackupCodec.encode(ohne))
         assertEquals(ohne, zurueck)
-        assertNull(zurueck.plan)
+        assertTrue(zurueck.plan.isEmpty())
     }
 
     @Test
     fun leeresTeamIstErlaubt() {
-        val leer = daten.copy(team = emptyList(), wishes = emptyList(), plan = null)
+        val leer = daten.copy(team = emptyList(), wishes = emptyList(), plan = YearPlan.EMPTY)
         assertEquals(leer, BackupCodec.decode(BackupCodec.encode(leer)))
     }
 
@@ -151,34 +154,12 @@ class BackupTest {
     // ---------------------------------------------------------------- Aufräumen
 
     @Test
-    fun behaltenAbVorjahrOderPlanbeginn() {
-        val heute = LocalDate.of(2026, 11, 3)
-        assertEquals(LocalDate.of(2025, 1, 1), WishCleanup.keepFrom(heute, null))
-        assertEquals(LocalDate.of(2025, 1, 1), WishCleanup.keepFrom(heute, plan))
-        val alterPlan = plan.copy(firstDay = LocalDate.of(2024, 12, 30), slots = emptyList())
-        assertEquals(LocalDate.of(2024, 12, 30), WishCleanup.keepFrom(heute, alterPlan))
-    }
-
-    @Test
-    fun aufraeumenEntferntAlteUndVerwaisteEintraege() {
-        val ab = LocalDate.of(2025, 1, 1)
-        val eintraege = listOf(
-            Absence("a", LocalDate.of(2024, 12, 31), AbsenceType.VACATION),
-            Absence("a", ab, AbsenceType.VACATION),
-            Absence("weg", mo, AbsenceType.SICK),
-            Absence("b", mo, AbsenceType.DAY_OFF_WISH),
-        )
-        assertEquals(
-            listOf(Absence("a", ab, AbsenceType.VACATION), Absence("b", mo, AbsenceType.DAY_OFF_WISH)),
-            WishCleanup.clean(eintraege, setOf("a", "b"), ab),
-        )
-    }
-
-    @Test
-    fun ohneBekanntesTeamBleibenAllePersonen() {
-        val ab = LocalDate.of(2025, 1, 1)
-        val eintraege = listOf(Absence("weg", mo, AbsenceType.SICK), Absence("a", LocalDate.of(2020, 5, 5), AbsenceType.SICK))
-        assertEquals(listOf(Absence("weg", mo, AbsenceType.SICK)), WishCleanup.clean(eintraege, null, ab))
+    fun sicherungAus018MitAltemPlanformatWirdGelesen() {
+        // 0.1.8 schrieb den Plan als einen Zeitraum (Version 1).
+        val obj = Json.parseToJsonElement(BackupCodec.encode(daten)).jsonObject
+        val alt = JsonObject(obj + ("plan" to Json.parseToJsonElement(PlanCodec.encode(plan)))).toString()
+        assertTrue("\"firstDay\"" in alt, alt)
+        assertEquals(daten, BackupCodec.decode(alt))
     }
 
     private companion object {

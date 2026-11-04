@@ -3,45 +3,60 @@ package de.reichimd.schichtplaner.plan
 import android.content.Context
 import de.reichimd.schichtplaner.core.plan.PlanCodec
 import de.reichimd.schichtplaner.core.plan.ShiftPlan
+import de.reichimd.schichtplaner.core.plan.YearPlan
+import de.reichimd.schichtplaner.core.plan.YearPlans
+import de.reichimd.schichtplaner.core.shop.ShopSettings
 import de.reichimd.schichtplaner.daten.DateiSpeicher
 import de.reichimd.schichtplaner.daten.DateiTexte
 import de.reichimd.schichtplaner.daten.DateiZustand
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
+import java.time.LocalDate
 
-internal typealias PlanZustand = DateiZustand<ShiftPlan?>
+internal typealias PlanZustand = DateiZustand<YearPlan>
 
-internal val DateiZustand<ShiftPlan?>.plan: ShiftPlan? get() = wert
+internal val DateiZustand<YearPlan>.plan: YearPlan get() = wert
 
 /**
- * Der fertige Plan samt Änderungen von Hand (plan.json im App-Ordner, siehe [DateiSpeicher]).
- * Jede Änderung wird sofort gespeichert. Ändern sich später Team, Laden oder Kalender, bleibt der Plan stehen.
+ * Der ganze Plan, Woche für Woche (plan.json im App-Ordner, siehe [DateiSpeicher] und [YearPlan]).
+ * Jede Änderung wird sofort gespeichert. Wochen, die nie angefasst wurden, stehen nicht in der Datei.
  */
 internal class PlanStore(dir: File) {
 
-    private val datei = DateiSpeicher<ShiftPlan?>(
+    private val datei = DateiSpeicher(
         ordner = dir,
         dateiname = DATEINAME,
-        leer = null,
+        leer = YearPlan.EMPTY,
         texte = DateiTexte(
             name = "Der gespeicherte Plan",
-            danachLeer = "Bitte den Plan neu erstellen.",
+            danachLeer = "Der Plan ist jetzt leer.",
             gesperrt = "kann der Plan gerade nicht geändert werden.",
         ),
-        encode = PlanCodec::encode,
-        decode = PlanCodec::decode,
+        encode = PlanCodec::encodeYear,
+        decode = PlanCodec::decodeYear,
     )
 
     val zustand: StateFlow<PlanZustand> = datei.zustand
 
-    /** Neuer Plan ersetzt den alten. Gibt false zurück, wenn gerade nicht gespeichert werden darf. */
-    fun ersetzen(plan: ShiftPlan): Boolean = datei.aendern { plan }
+    /** Ganzen Plan ersetzen, z. B. beim Einspielen einer Sicherung. */
+    fun ersetzen(plan: YearPlan): Boolean = datei.aendern { plan }
 
-    /** Änderung von Hand am vorhandenen Plan. Ohne Plan passiert nichts. */
-    fun aendern(wie: (ShiftPlan) -> ShiftPlan): Boolean = datei.aendern { it?.let(wie) }
+    /**
+     * Woche ab [montag] ändern. [wie] bekommt die Woche wie angezeigt (gespeichert oder aus [laden]).
+     * Gibt false zurück, wenn gerade nicht gespeichert werden darf.
+     */
+    fun woche(montag: LocalDate, laden: ShopSettings, wie: (ShiftPlan) -> ShiftPlan): Boolean =
+        datei.aendern { YearPlans.withWeek(it, wie(YearPlans.week(it, montag, laden))) }
 
-    /** Plan aus einer Sicherung übernehmen; null = kein Plan. */
-    fun ersetzenOderLeeren(plan: ShiftPlan?): Boolean = datei.aendern { plan }
+    /** Woche leeren: danach gelten wieder die Schichtvorlagen des Ladens, alle offen. */
+    fun wocheLeeren(montag: LocalDate): Boolean = datei.aendern { YearPlans.clearWeek(it, montag) }
+
+    /** Nur ändern, wenn der Plan noch [erwartet] ist (z. B. nicht inzwischen eine Sicherung eingespielt). */
+    fun wennUnveraendert(erwartet: YearPlan, wie: (YearPlan) -> YearPlan): Boolean {
+        var ok = false
+        val geaendert = datei.aendern { if (it === erwartet) wie(it).also { ok = true } else it }
+        return geaendert && ok
+    }
 
     fun meldungGelesen() = datei.meldungGelesen()
 

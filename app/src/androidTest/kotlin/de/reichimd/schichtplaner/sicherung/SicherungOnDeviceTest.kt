@@ -13,6 +13,7 @@ import de.reichimd.schichtplaner.core.plan.PlanPrint
 import de.reichimd.schichtplaner.core.plan.PlanSlot
 import de.reichimd.schichtplaner.core.plan.ShiftPlan
 import de.reichimd.schichtplaner.core.plan.SlotKey
+import de.reichimd.schichtplaner.core.plan.YearPlan
 import de.reichimd.schichtplaner.core.shop.Shop
 import de.reichimd.schichtplaner.laden.LadenStore
 import de.reichimd.schichtplaner.laden.laden
@@ -27,7 +28,6 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -86,7 +86,7 @@ class SicherungOnDeviceTest {
                 ),
             ),
         )
-        assertTrue(alt.plan.ersetzenOderLeeren(plan))
+        assertTrue(alt.plan.ersetzen(YearPlan.of(plan)))
         warte { alt.fertig() }
 
         val datei = File(wurzel, "sicherung.json").also { it.createNewFile() }
@@ -97,7 +97,7 @@ class SicherungOnDeviceTest {
         warte { neu.fertig() }
         val gelesen = Sicherung.lesen(context, Uri.fromFile(datei))
         val rueckweg = File(wurzel, "rueckweg.json")
-        warte { Sicherung.einspielen(neu, gelesen, rueckweg, heute) }
+        warte { Sicherung.einspielen(neu, gelesen, rueckweg) }
         warte { neu.fertig() }
 
         // Wie nach einem Neustart: alles frisch aus den Dateien lesen.
@@ -105,13 +105,14 @@ class SicherungOnDeviceTest {
         warte { neustart.fertig() }
         assertEquals(listOf(anna, ben), neustart.team.zustand.value.team)
         assertEquals(4, neustart.laden.zustand.value.laden.planWeeks)
-        assertEquals(listOf(Absence("a", mo, AbsenceType.VACATION)), neustart.wuensche.zustand.value.eintraege)
-        assertEquals(plan, neustart.plan.zustand.value.plan)
+        // Nichts wird aufgeräumt: auch alte Monate und unbekannte Personen bleiben.
+        assertEquals(3, neustart.wuensche.zustand.value.eintraege.size)
+        assertEquals(YearPlan.of(plan), neustart.plan.zustand.value.plan)
 
         // Der vorherige (leere) Stand liegt als Rückweg bereit.
         val vorher = Sicherung.lesen(context, Uri.fromFile(rueckweg))
         assertEquals(emptyList<Employee>(), vorher.team)
-        assertNull(vorher.plan)
+        assertTrue(vorher.plan.isEmpty())
     }
 
     @Test
@@ -128,19 +129,6 @@ class SicherungOnDeviceTest {
             assertEquals("Das ist keine Sicherung des Schichtplaners.", e.message)
         }
         assertEquals(listOf(anna), s.team.zustand.value.team)
-    }
-
-    @Test
-    fun aufraeumenBeimStartLaesstUnbekanntesTeamInRuhe() {
-        val s = speicher("start")
-        warte { s.fertig() }
-        assertTrue(s.wuensche.ersetzen(listOf(Absence("x", mo, AbsenceType.VACATION), Absence("x", LocalDate.of(2020, 1, 1), AbsenceType.SICK))))
-        warte { s.fertig() }
-        // Team leer: Personen werden nicht abgeglichen, nur Uraltes fliegt raus.
-        warte { Sicherung.aufraeumen(s, heute) }
-        warte { s.fertig() }
-        assertEquals(listOf(Absence("x", mo, AbsenceType.VACATION)), s.wuensche.zustand.value.eintraege)
-        assertNull(s.plan.zustand.value.plan)
     }
 
     @Test

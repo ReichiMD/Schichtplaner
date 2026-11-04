@@ -35,8 +35,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -78,6 +76,8 @@ import de.reichimd.schichtplaner.core.plan.Severity
 import de.reichimd.schichtplaner.core.plan.ShiftPlan
 import de.reichimd.schichtplaner.core.plan.SlotKey
 import de.reichimd.schichtplaner.core.plan.Warning
+import de.reichimd.schichtplaner.core.team.Team
+import de.reichimd.schichtplaner.core.plan.YearPlans
 import de.reichimd.schichtplaner.core.shop.Shop
 import de.reichimd.schichtplaner.core.wishes.Wishes
 import de.reichimd.schichtplaner.laden.LadenStore
@@ -114,74 +114,64 @@ import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.time.temporal.IsoFields
 
-/** Stand der Berechnung. Der Plan selbst liegt im [PlanStore] und übersteht Neustarts. */
+/** Stand von "Rest ausfüllen". Der Plan selbst liegt im [PlanStore] und übersteht Neustarts. */
 internal sealed interface Rechnung {
     data object Ruht : Rechnung
-    data object Rechnet : Rechnung
-    data class Fertig(val millis: Long) : Rechnung
+    data class Rechnet(val montag: LocalDate) : Rechnung
+    data class Fertig(val montag: LocalDate, val millis: Long, val offen: Int) : Rechnung
     /** Der Planer hat in der Rechenzeit gar keinen Plan gefunden (nicht dasselbe wie Personalmangel). */
-    data object NichtGefunden : Rechnung
-    data class Fehler(val meldung: String) : Rechnung
+    data class NichtGefunden(val montag: LocalDate) : Rechnung
+    data class Fehler(val montag: LocalDate, val meldung: String) : Rechnung
 }
 
 /**
- * Hält die Berechnung über Drehen des Handys und Wechsel der Reiter hinweg.
- * Das Ergebnis landet im [PlanStore]; der alte Plan bleibt bis dahin stehen.
+ * Hält "Rest ausfüllen" über Drehen des Handys und Wechsel der Reiter hinweg, und die gezeigte Woche.
+ * Das Ergebnis landet im [PlanStore].
  */
 internal class PlanViewModel : ViewModel() {
     var rechnung by mutableStateOf<Rechnung>(Rechnung.Ruht)
         private set
-    var woche by mutableIntStateOf(0)
 
-    /** Zählt neu erstellte Pläne, damit das Blättern auch bei gleichem Zeitraum wieder bei Woche 1 beginnt. */
-    var planNummer by mutableIntStateOf(0)
-        private set
+    /** Montag der gezeigten Woche; null = noch nicht gesetzt (dann die aktuelle Woche). */
+    var montag by mutableStateOf<LocalDate?>(null)
 
-    fun erstellen(teamStore: TeamStore, ladenStore: LadenStore, wuenscheStore: WuenscheStore, planStore: PlanStore) {
+    fun meldungWeg() {
+        if (rechnung !is Rechnung.Rechnet) rechnung = Rechnung.Ruht
+    }
+
+    /** Offene Schichten der Woche ab [woche] besetzen. Was schon eingetragen ist, bleibt. */
+    fun ausfuellen(woche: LocalDate, teamStore: TeamStore, ladenStore: LadenStore, wuenscheStore: WuenscheStore, planStore: PlanStore) {
         if (rechnung is Rechnung.Rechnet) return
-        rechnung = Rechnung.Rechnet
+        rechnung = Rechnung.Rechnet(woche)
         viewModelScope.launch {
             rechnung = try {
-                var ergebnis: Rechnung = Rechnung.Ruht
-                // Ändert sich Team, Laden oder Kalender während des Rechnens, wird gleich neu gerechnet (höchstens dreimal).
-                // Spielt jemand währenddessen eine Sicherung ein, bleibt deren Plan stehen.
-                var planVorher = planStore.zustand.first { !it.laedt }.plan
-                for (versuch in 1..3) {
-                    // Mit dem gespeicherten Team, solange noch keins angelegt ist mit dem erfundenen Beispiel.
-                    val team = teamStore.zustand.first { !it.laedt }.team
-                    val laden = ladenStore.zustand.first { !it.laedt }.laden
-                    val wuensche = wuenscheStore.zustand.first { !it.laedt }.eintraege
-                    val start = System.currentTimeMillis()
-                    // Der Planer rechnet einige Sekunden (höchstens 15 s): nie im UI-Thread.
-                    val neu = withContext(Dispatchers.Default) {
-                        val request = DemoData.request(employees = team.ifEmpty { DemoData.team }, laden = laden, absences = wuensche)
-                        val plan = Planner.plan(request)
-                        if (plan.solved) ShiftPlan.from(request, plan) else null
-                    }
-                    val millis = System.currentTimeMillis() - start
-                    val veraltet = team != teamStore.zustand.value.team ||
-                        laden != ladenStore.zustand.value.laden ||
-                        wuensche != wuenscheStore.zustand.value.eintraege
-                    ergebnis = when {
-                        planStore.zustand.value.plan !== planVorher ->
-                            Rechnung.Fehler("Der Plan wurde während der Berechnung ersetzt (z. B. durch eine Sicherung). Der jetzige Plan bleibt stehen.")
-                        neu == null -> Rechnung.NichtGefunden
-                        !planStore.ersetzen(neu) -> Rechnung.Fehler("Der neue Plan konnte nicht gespeichert werden. Der alte bleibt stehen.")
-                        else -> Rechnung.Fertig(millis)
-                    }
-                    if (ergebnis !is Rechnung.Fertig) break
-                    planVorher = neu
-                    if (!veraltet) break
+                // Mit dem gespeicherten Team, solange noch keins angelegt ist mit dem erfundenen Beispiel.
+                val team = teamStore.zustand.first { !it.laedt }.team.ifEmpty { DemoData.team }
+                val laden = ladenStore.zustand.first { !it.laedt }.laden
+                val wuensche = wuenscheStore.zustand.first { !it.laedt }.eintraege
+                val vorher = planStore.zustand.first { !it.laedt }.plan
+                val start = System.currentTimeMillis()
+                // Der Planer rechnet einige Sekunden (höchstens 15 s): nie im UI-Thread.
+                val ergebnis = withContext(Dispatchers.Default) {
+                    Planner.plan(YearPlans.fillRequest(vorher, woche, laden, team, wuensche))
                 }
-                if (ergebnis is Rechnung.Fertig) {
-                    woche = 0
-                    planNummer++
+                val millis = System.currentTimeMillis() - start
+                val ids = team.map { it.id }.toSet()
+                when {
+                    !ergebnis.solved -> Rechnung.NichtGefunden(woche)
+                    // Nur eintragen, wenn sich der Plan inzwischen nicht geändert hat (z. B. Sicherung eingespielt).
+                    !planStore.wennUnveraendert(vorher) { p ->
+                        YearPlans.withWeek(p, YearPlans.applyFill(YearPlans.week(p, woche, laden), ergebnis, ids))
+                    } -> Rechnung.Fehler(woche, "Der Plan wurde inzwischen geändert. Bitte noch einmal „Rest ausfüllen“.")
+                    else -> {
+                        val neu = YearPlans.week(planStore.zustand.value.plan, woche, laden)
+                        Rechnung.Fertig(woche, millis, PlanSheet.openCount(neu, ids))
+                    }
                 }
-                ergebnis
             } catch (e: CancellationException) {
                 throw e
             } catch (t: Throwable) {
-                Rechnung.Fehler("${t::class.java.simpleName}: ${t.message}")
+                Rechnung.Fehler(woche, "${t::class.java.simpleName}: ${t.message}")
             }
         }
     }
@@ -193,7 +183,10 @@ private fun tagText(d: LocalDate) = "${Weekdays.short(d.dayOfWeek)}, ${d.format(
 
 private fun zeitText(s: PlanSlot) = "${PlanSheet.time(s.start)}–${PlanSheet.time(s.end)}"
 
-/** Plan-Reiter: Wochenblatt wie auf dem Papier, Antippen ändert die Schicht. */
+/**
+ * Plan-Reiter: Wochenblatt wie auf dem Papier, immer da, durch das ganze Jahr wischbar.
+ * Antippen ändert eine Schicht, "Rest ausfüllen" besetzt die offenen Schichten der gezeigten Woche.
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun PlanScreen(
@@ -201,6 +194,7 @@ internal fun PlanScreen(
     ladenStore: LadenStore = LadenStore.get(LocalContext.current),
     wuenscheStore: WuenscheStore = WuenscheStore.get(LocalContext.current),
     planStore: PlanStore = PlanStore.get(LocalContext.current),
+    heute: LocalDate = LocalDate.now(),
     vm: PlanViewModel = viewModel(),
 ) {
     val team by teamStore.zustand.collectAsState()
@@ -209,19 +203,39 @@ internal fun PlanScreen(
     val gespeichert by planStore.zustand.collectAsState()
     val rechnung = vm.rechnung
 
-    var nachfragen by remember { mutableStateOf(false) }
+    var leerenFrage by remember { mutableStateOf(false) }
     // Geöffnetes Feld als Text, damit es Drehen übersteht: "Mitarbeiter-ID|Datum" bzw. Datum der offenen Schichten.
     var feld by rememberSaveable { mutableStateOf<String?>(null) }
     var offenerTag by rememberSaveable { mutableStateOf<String?>(null) }
 
-    val leute = team.team.ifEmpty { DemoData.team }
-    val teamIds = remember(leute) { leute.map { it.id }.toSet() }
+    // Alle, auch Ausgeschiedene (für alte Wochen). Eingeplant und zur Auswahl angeboten werden nur Aktive.
+    val alle = team.team.ifEmpty { DemoData.team }
+    val aktive = remember(alle) { Team.active(alle) }
+    val alleIds = remember(alle) { alle.map { it.id }.toSet() }
     val abwesend = wuensche.eintraege
     val plan = gespeichert.plan
-    val hinweise = remember(plan, leute, abwesend) { plan?.let { PlanCheck.warnings(it, leute, abwesend) }.orEmpty() }
-    val aenderbar = gespeichert.bearbeitbar && rechnung !is Rechnung.Rechnet
+    val shop = laden.laden
+    val wochen = remember(heute) { YearPlans.range(heute) }
+    val startSeite = remember(wochen) { wochen.indexOf(YearPlans.monday(heute)).coerceAtLeast(0) }
+    val rechnet = rechnung is Rechnung.Rechnet
+    val aenderbar = gespeichert.bearbeitbar && !rechnet
 
-    fun erstellen() = vm.erstellen(teamStore, ladenStore, wuenscheStore, planStore)
+    val pager = rememberPagerState(
+        initialPage = vm.montag?.let { wochen.indexOf(it) }?.takeIf { it >= 0 } ?: startSeite,
+    ) { wochen.size }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(pager) {
+        snapshotFlow { pager.currentPage }.collect { vm.montag = wochen[it] }
+    }
+    val montag = wochen[pager.currentPage.coerceIn(0, wochen.lastIndex)]
+    val woche = remember(plan, montag, shop) { YearPlans.week(plan, montag, shop) }
+    // Drei Wochen, damit Ruhezeit und Tage am Stück über den Wochenwechsel geprüft werden (auch in den Dialogen).
+    val fenster = remember(plan, montag, shop) { YearPlans.weeks(plan, montag.minusWeeks(1), 3, shop) }
+    val hinweise = remember(plan, montag, shop, alle, abwesend) { YearPlans.warnings(plan, montag, shop, alle, abwesend) }
+    val zeilen = remember(alle, woche) { YearPlans.rows(alle, woche) }
+
+    fun ausfuellen() = vm.ausfuellen(montag, teamStore, ladenStore, wuenscheStore, planStore)
+    fun aendern(tag: LocalDate, wie: (ShiftPlan) -> ShiftPlan) = planStore.woche(YearPlans.monday(tag), shop, wie)
 
     Column(
         Modifier
@@ -237,24 +251,17 @@ internal fun PlanScreen(
             color = Schrift,
             modifier = Modifier.padding(horizontal = 8.dp),
         )
-        Text(
-            buildString {
-                append(
-                    if (team.team.isEmpty()) "Noch kein Team angelegt: Der Plan nutzt ein erfundenes Beispiel-Team. "
-                    else "Plan mit deinem Team (${team.team.size} Personen). ",
-                )
-                append(
-                    if (laden.eingerichtet) "Laden und Schichten wie unter „Laden“ eingestellt."
-                    else "Laden und Schichten sind noch Beispielwerte (unter „Laden“ prüfen).",
-                )
-                if (team.team.isNotEmpty() && wuensche.bearbeitbar) {
-                    append(" Urlaub und Wünsche aus dem Kalender unter „Wünsche“ werden berücksichtigt.")
-                }
-            },
-            fontSize = 14.sp,
-            color = TextLeise,
-            modifier = Modifier.padding(horizontal = 8.dp),
-        )
+        if (team.team.isEmpty() || !laden.eingerichtet) {
+            Text(
+                buildString {
+                    if (team.team.isEmpty()) append("Noch kein Team angelegt: Der Plan nutzt ein erfundenes Beispiel-Team. ")
+                    if (!laden.eingerichtet) append("Laden und Schichten sind noch Beispielwerte (unter „Laden“ prüfen).")
+                }.trim(),
+                fontSize = 14.sp,
+                color = TextLeise,
+                modifier = Modifier.padding(horizontal = 8.dp),
+            )
+        }
 
         UpdateBanner()
 
@@ -266,140 +273,160 @@ internal fun PlanScreen(
         }
         if (!wuensche.laedt && wuensche.nurLesen) {
             Hinweis(
-                "Der Wünsche-Kalender ist gerade gesperrt, der Plan rechnet ohne Urlaub und Wünsche. " +
+                "Der Wünsche-Kalender ist gerade gesperrt, „Rest ausfüllen“ rechnet ohne Urlaub und Wünsche. " +
                     "Mehr dazu unter „Wünsche“.",
                 Modifier.padding(horizontal = 8.dp),
             )
         }
-        if (Shop.problems(laden.laden).isNotEmpty()) {
+        if (Shop.problems(shop).isNotEmpty()) {
             Hinweis("Die Laden-Einstellungen haben Fehler. Bitte unter „Laden“ korrigieren.", Modifier.padding(horizontal = 8.dp))
         }
-        Shop.warnings(laden.laden).forEach { Hinweis(it, Modifier.padding(horizontal = 8.dp)) }
-
-        Button(
-            onClick = {
-                // Ein laufender oder künftiger Plan mit Handänderungen wird nicht ohne Nachfrage ersetzt.
-                if (plan != null && !plan.lastDay.isBefore(LocalDate.now())) nachfragen = true else erstellen()
-            },
-            enabled = aenderbar,
-            colors = ButtonDefaults.buttonColors(containerColor = Akzent),
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp)
-                .heightIn(min = 52.dp),
-        ) {
-            Text(
-                if (plan == null) "Plan erstellen (${laden.laden.planWeeks} Wochen)" else "Neuen Plan erstellen (${laden.laden.planWeeks} Wochen)",
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-            )
-        }
-
-        when (rechnung) {
-            Rechnung.Ruht -> Unit
-            Rechnung.Rechnet -> Row(
-                Modifier.padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                CircularProgressIndicator(Modifier.size(24.dp), color = Akzent)
-                Text("Plan wird berechnet …", color = Schrift)
-            }
-            is Rechnung.Fertig -> Text(
-                "Neu berechnet in ${rechnung.millis / 1000.0} s.",
-                fontSize = 13.sp,
-                color = TextLeise,
-                modifier = Modifier.padding(horizontal = 8.dp),
-            )
-            Rechnung.NichtGefunden -> Hinweis(
-                "In der Rechenzeit wurde kein Plan gefunden. Bitte erneut versuchen." +
-                    if (plan != null) " Der bisherige Plan bleibt stehen." else "",
-                Modifier.padding(horizontal = 8.dp),
-            )
-            is Rechnung.Fehler -> Hinweis("Fehler im Planer: ${rechnung.meldung}", Modifier.padding(horizontal = 8.dp))
-        }
+        Shop.warnings(shop).forEach { Hinweis(it, Modifier.padding(horizontal = 8.dp)) }
 
         if (gespeichert.laedt) {
             CircularProgressIndicator(Modifier.padding(horizontal = 8.dp).size(24.dp), color = Akzent)
         }
 
-        if (plan != null) {
-            Zusammenfassung(plan, teamIds, hinweise)
-            // Ein neuer Zeitraum beginnt mit eigenem Blätter-Zustand; Handänderungen behalten die Woche.
-            key(plan.firstDay, plan.days, vm.planNummer) {
-                val pager = rememberPagerState(initialPage = vm.woche.coerceIn(0, plan.weeks - 1)) { plan.weeks }
-                val scope = rememberCoroutineScope()
-                LaunchedEffect(pager) {
-                    snapshotFlow { pager.currentPage }.collect { vm.woche = it }
+        WochenKopf(
+            ersterTag = montag,
+            heute = heute,
+            zurueck = { scope.launch { pager.animateScrollToPage(pager.currentPage - 1) } },
+            weiter = { scope.launch { pager.animateScrollToPage(pager.currentPage + 1) } },
+            zurHeutigen = { scope.launch { pager.animateScrollToPage(startSeite) } },
+            ersteWoche = pager.currentPage == 0,
+            letzteWoche = pager.currentPage == wochen.lastIndex,
+        )
+
+        Row(
+            Modifier.padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Button(
+                onClick = ::ausfuellen,
+                enabled = aenderbar,
+                colors = ButtonDefaults.buttonColors(containerColor = Akzent),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 52.dp)
+                    .testTag("rest-ausfuellen"),
+            ) {
+                Text("Rest ausfüllen", fontSize = 17.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+            }
+            OutlinedButton(
+                onClick = { leerenFrage = true },
+                enabled = aenderbar && plan.hasWeek(montag),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .heightIn(min = 52.dp)
+                    .testTag("woche-leeren"),
+            ) { Text("Leeren", fontSize = 15.sp, color = if (aenderbar && plan.hasWeek(montag)) Akzent else Rand) }
+        }
+        Text(
+            "Was schon eingetragen ist, bleibt. Gefüllt wird nur diese Woche.",
+            fontSize = 12.sp,
+            color = TextLeise,
+            modifier = Modifier.padding(horizontal = 8.dp),
+        )
+
+        // Meldungen von "Rest ausfüllen" nur in der Woche, für die gerechnet wurde.
+        when (rechnung) {
+            Rechnung.Ruht -> Unit
+            is Rechnung.Rechnet -> Row(
+                Modifier.padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                CircularProgressIndicator(Modifier.size(24.dp), color = Akzent)
+                Text(
+                    if (rechnung.montag == montag) "Woche wird ausgefüllt …"
+                    else "Woche ab ${rechnung.montag.format(TAG_FORMAT)} wird ausgefüllt …",
+                    color = Schrift,
+                )
+            }
+            is Rechnung.Fertig -> if (rechnung.montag == montag) {
+                Text(
+                    (if (rechnung.offen == 0) "Ausgefüllt" else "Ausgefüllt, ${rechnung.offen} offen (zu wenig Personal oder Regeln)") +
+                        " · ${rechnung.millis / 1000.0} s",
+                    fontSize = 13.sp,
+                    color = TextLeise,
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                )
+            }
+            is Rechnung.NichtGefunden -> if (rechnung.montag == montag) {
+                Hinweis(
+                    "In der Rechenzeit wurde keine Lösung gefunden. Bitte erneut versuchen. Es wurde nichts geändert.",
+                    Modifier.padding(horizontal = 8.dp),
+                ) { TextButton(onClick = vm::meldungWeg) { Text("OK", color = Akzent) } }
+            }
+            is Rechnung.Fehler -> if (rechnung.montag == montag) {
+                Hinweis("Rest ausfüllen: ${rechnung.meldung}", Modifier.padding(horizontal = 8.dp)) {
+                    TextButton(onClick = vm::meldungWeg) { Text("OK", color = Akzent) }
                 }
-                WochenKopf(
-                    ersterTag = plan.weekStart(pager.currentPage),
-                    woche = pager.currentPage,
-                    wochen = plan.weeks,
-                    zurueck = { scope.launch { pager.animateScrollToPage(pager.currentPage - 1) } },
-                    weiter = { scope.launch { pager.animateScrollToPage(pager.currentPage + 1) } },
-                )
-                Wochenblatt(
-                    plan = plan,
-                    leute = leute,
-                    abwesend = abwesend,
-                    hinweise = hinweise,
-                    pager = pager,
-                    aenderbar = aenderbar,
-                    feldAntippen = { id, tag -> feld = "$id|$tag" },
-                    offenAntippen = { tag -> offenerTag = tag.toString() },
-                )
-                Legende()
-                PdfKnoepfe(plan, leute, abwesend, Modifier.padding(horizontal = 8.dp))
-                WochenHinweise(plan, pager.currentPage, hinweise) { w -> if (aenderbar) feld = "${w.employeeId}|${w.key.date}" }
             }
         }
+
+        Zusammenfassung(woche, alleIds, hinweise)
+        Wochenblatt(
+            wochen = wochen,
+            wocheVon = { YearPlans.week(plan, it, shop) },
+            personen = zeilen,
+            alleIds = alleIds,
+            abwesend = abwesend,
+            hinweise = hinweise,
+            pager = pager,
+            aenderbar = aenderbar,
+            feldAntippen = { id, tag -> feld = "$id|$tag" },
+            offenAntippen = { tag -> offenerTag = tag.toString() },
+        )
+        Legende()
+        PdfKnoepfe(plan, montag, shop, alle, abwesend, Modifier.padding(horizontal = 8.dp))
+        WochenHinweise(woche, hinweise) { w -> if (aenderbar) feld = "${w.employeeId}|${w.key.date}" }
 
         Spacer(Modifier.height(8.dp))
         VersionZeile()
     }
 
-    if (nachfragen && plan != null) {
+    if (leerenFrage) {
         AlertDialog(
-            onDismissRequest = { nachfragen = false },
-            title = { Text("Neuen Plan erstellen?") },
+            onDismissRequest = { leerenFrage = false },
+            title = { Text("Woche leeren?") },
             text = {
                 Text(
-                    "Der jetzige Plan (${plan.firstDay.format(TAG_FORMAT)} – ${plan.lastDay.format(TAG_FORMAT)}) " +
-                        "wird mit allen Änderungen von Hand ersetzt.",
+                    "Alle Einträge der Woche ${montag.format(TAG_FORMAT)} – ${montag.plusDays(6).format(TAG_FORMAT)} " +
+                        "werden entfernt, auch Änderungen von Hand. Danach gelten wieder die Schichten aus „Laden“.",
                 )
             },
             confirmButton = {
-                TextButton(onClick = { nachfragen = false; erstellen() }, modifier = Modifier.testTag("neu-erstellen")) {
-                    Text("Neu erstellen", color = Akzent, fontWeight = FontWeight.Bold)
+                TextButton(onClick = { leerenFrage = false; planStore.wocheLeeren(montag) }, modifier = Modifier.testTag("leeren-ok")) {
+                    Text("Leeren", color = Akzent, fontWeight = FontWeight.Bold)
                 }
             },
-            dismissButton = { TextButton(onClick = { nachfragen = false }) { Text("Abbrechen", color = Schrift) } },
+            dismissButton = { TextButton(onClick = { leerenFrage = false }) { Text("Abbrechen", color = Schrift) } },
         )
     }
 
     val offenesFeld = feld
-    if (plan != null && offenesFeld != null) {
+    if (offenesFeld != null) {
         // Das Datum steht hinten, die ID davor (sie darf selbst "|" enthalten).
-        val person = leute.firstOrNull { it.id == offenesFeld.substringBeforeLast('|') }
+        val person = alle.firstOrNull { it.id == offenesFeld.substringBeforeLast('|') }
         val tag = runCatching { LocalDate.parse(offenesFeld.substringAfterLast('|')) }.getOrNull()
-        if (person == null || tag == null || !PlanSheet.inPlan(plan, tag) || !aenderbar) {
+        if (person == null || tag == null || YearPlans.monday(tag) != montag || !aenderbar) {
             LaunchedEffect(feld) { feld = null }
         } else {
             PersonTagDialog(
-                plan = plan,
+                plan = fenster,
                 person = person,
                 tag = tag,
-                leute = leute,
+                leute = alle,
                 abwesend = abwesend,
                 hinweise = hinweise,
-                uebernehmen = { stelle -> planStore.aendern { PlanEdit.assign(it, stelle, person.id, teamIds) } },
-                freiGeben = { planStore.aendern { PlanEdit.free(it, person.id, tag) } },
+                uebernehmen = { stelle -> aendern(tag) { PlanEdit.assign(it, stelle, person.id, alleIds) } },
+                freiGeben = { aendern(tag) { PlanEdit.free(it, person.id, tag) } },
                 zeiten = { stelle, beginn, ende ->
                     PlanEdit.timeProblem(beginn, ende) ?: run {
-                        planStore.aendern { PlanEdit.setTimes(it, stelle, beginn, ende) }
+                        aendern(tag) { PlanEdit.setTimes(it, stelle, beginn, ende) }
                         null
                     }
                 },
@@ -410,16 +437,16 @@ internal fun PlanScreen(
 
     val offenDatum = offenerTag?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
     if (offenerTag != null) {
-        if (plan == null || offenDatum == null || !PlanSheet.inPlan(plan, offenDatum) || !aenderbar) {
+        if (offenDatum == null || YearPlans.monday(offenDatum) != montag || !aenderbar) {
             LaunchedEffect(offenerTag) { offenerTag = null }
         } else {
             OffenDialog(
-                plan = plan,
+                plan = fenster,
                 tag = offenDatum,
-                leute = leute,
-                teamIds = teamIds,
+                leute = aktive,
+                teamIds = alleIds,
                 abwesend = abwesend,
-                uebernehmen = { stelle, id -> planStore.aendern { PlanEdit.assign(it, stelle, id, teamIds) } },
+                uebernehmen = { stelle, id -> aendern(offenDatum) { PlanEdit.assign(it, stelle, id, alleIds) } },
                 schliessen = { offenerTag = null },
             )
         }
@@ -427,20 +454,28 @@ internal fun PlanScreen(
 }
 
 @Composable
-private fun Zusammenfassung(plan: ShiftPlan, teamIds: Set<String>, hinweise: List<Warning>) {
-    val offen = PlanSheet.openCount(plan, teamIds)
+private fun Zusammenfassung(woche: ShiftPlan, teamIds: Set<String>, hinweise: List<Warning>) {
+    val offen = PlanSheet.openCount(woche, teamIds)
     val regeln = hinweise.count { it.severity == Severity.RULE }
     val wuensche = hinweise.count { it.severity == Severity.WISH }
+    val besetzt = woche.slots.size - offen
     val text = buildString {
-        append("Plan ${plan.firstDay.format(TAG_FORMAT)} – ${plan.lastDay.format(TAG_FORMAT)}: ")
+        append("Diese Woche: ")
         val teile = buildList {
             if (offen > 0) add(if (offen == 1) "1 Schicht offen" else "$offen Schichten offen")
             if (regeln > 0) add(if (regeln == 1) "1 Regel verletzt" else "$regeln Regeln verletzt")
             if (wuensche > 0) add(if (wuensche == 1) "1 Frei-Wunsch nicht erfüllt" else "$wuensche Frei-Wünsche nicht erfüllt")
         }
-        append(if (teile.isEmpty()) "Alle Schichten besetzt, keine Regel verletzt." else teile.joinToString(", ") + ".")
+        append(
+            when {
+                woche.slots.isEmpty() -> "keine Schichten."
+                teile.isEmpty() -> "Alle Schichten besetzt, keine Regel verletzt."
+                else -> teile.joinToString(", ") + "."
+            },
+        )
     }
-    val gut = offen == 0 && regeln == 0
+    // Eine ganz leere Woche ist kein Fehler, nur noch nicht geplant.
+    val gut = (offen == 0 || besetzt == 0) && regeln == 0
     Text(
         text,
         fontSize = 14.sp,
@@ -453,7 +488,16 @@ private fun Zusammenfassung(plan: ShiftPlan, teamIds: Set<String>, hinweise: Lis
 }
 
 @Composable
-private fun WochenKopf(ersterTag: LocalDate, woche: Int, wochen: Int, zurueck: () -> Unit, weiter: () -> Unit) {
+private fun WochenKopf(
+    ersterTag: LocalDate,
+    heute: LocalDate,
+    zurueck: () -> Unit,
+    weiter: () -> Unit,
+    zurHeutigen: () -> Unit,
+    ersteWoche: Boolean,
+    letzteWoche: Boolean,
+) {
+    val dieseWoche = YearPlans.monday(heute) == ersterTag
     Row(
         Modifier
             .fillMaxWidth()
@@ -462,19 +506,21 @@ private fun WochenKopf(ersterTag: LocalDate, woche: Int, wochen: Int, zurueck: (
     ) {
         OutlinedButton(
             onClick = zurueck,
-            enabled = woche > 0,
+            enabled = !ersteWoche,
             modifier = Modifier
                 .size(48.dp)
                 .semantics { contentDescription = "Vorige Woche" },
             contentPadding = ButtonDefaults.TextButtonContentPadding,
         ) {
-            Text("‹", fontSize = 22.sp, color = if (woche > 0) Schrift else Rand)
+            Text("‹", fontSize = 22.sp, color = if (!ersteWoche) Schrift else Rand)
         }
         Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                "KW ${ersterTag.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)} · Woche ${woche + 1} von $wochen",
+                "KW ${ersterTag.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)} · ${ersterTag.get(IsoFields.WEEK_BASED_YEAR)}" +
+                    if (dieseWoche) " · diese Woche" else "",
                 fontSize = 13.sp,
                 color = TextLeise,
+                modifier = Modifier.testTag("kw"),
             )
             Text(
                 "${ersterTag.format(TAG_FORMAT)} – ${ersterTag.plusDays(6).format(TAG_FORMAT)}",
@@ -483,17 +529,29 @@ private fun WochenKopf(ersterTag: LocalDate, woche: Int, wochen: Int, zurueck: (
                 color = Schrift,
                 modifier = Modifier.testTag("wochen-titel"),
             )
-            Text("wischen zum Blättern", fontSize = 11.sp, color = TextLeise)
+            if (dieseWoche) {
+                Text("wischen zum Blättern", fontSize = 11.sp, color = TextLeise)
+            } else {
+                Text(
+                    "zur aktuellen Woche",
+                    fontSize = 12.sp,
+                    color = Akzent,
+                    modifier = Modifier
+                        .clickable(role = Role.Button, onClick = zurHeutigen)
+                        .padding(vertical = 2.dp)
+                        .testTag("heute"),
+                )
+            }
         }
         OutlinedButton(
             onClick = weiter,
-            enabled = woche < wochen - 1,
+            enabled = !letzteWoche,
             modifier = Modifier
                 .size(48.dp)
                 .semantics { contentDescription = "Nächste Woche" },
             contentPadding = ButtonDefaults.TextButtonContentPadding,
         ) {
-            Text("›", fontSize = 22.sp, color = if (woche < wochen - 1) Schrift else Rand)
+            Text("›", fontSize = 22.sp, color = if (!letzteWoche) Schrift else Rand)
         }
     }
 }
@@ -521,16 +579,23 @@ private sealed interface BlattZeile {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun Wochenblatt(
-    plan: ShiftPlan,
-    leute: List<Employee>,
+    wochen: List<LocalDate>,
+    wocheVon: (LocalDate) -> ShiftPlan,
+    /** Zeilen der gezeigten Woche (mit Ausgeschiedenen, die dort gearbeitet haben). */
+    personen: List<Employee>,
+    /** Alle bekannten Personen: Wer hier drin ist, besetzt eine Schicht. */
+    alleIds: Set<String>,
     abwesend: List<Absence>,
+    /** Hinweise der gezeigten Woche. */
     hinweise: List<Warning>,
     pager: PagerState,
     aenderbar: Boolean,
     feldAntippen: (String, LocalDate) -> Unit,
     offenAntippen: (LocalDate) -> Unit,
 ) {
-    val teamIds = remember(leute) { leute.map { it.id }.toSet() }
+    val leute = personen
+    val teamIds = alleIds
+    val plan = wocheVon(wochen[pager.currentPage.coerceIn(0, wochen.lastIndex)])
     val abwesendAm: Map<Pair<String, LocalDate>, AbsenceType> = remember(abwesend) {
         abwesend.associate { (it.employeeId to it.date) to it.type }
     }
@@ -556,8 +621,6 @@ private fun Wochenblatt(
         BlattZeile.Aushilfen -> maxOf(30.dp, zeile * 2 + 6.dp)
         BlattZeile.Offen, BlattZeile.Summe -> maxOf(40.dp, zeile * 2 + 10.dp)
     }
-    val woche = pager.currentPage
-
     Column(verticalArrangement = Arrangement.spacedBy(ABSTAND)) {
         Row(horizontalArrangement = Arrangement.spacedBy(ABSTAND)) {
             Spacer(Modifier.width(NAMENSPALTE))
@@ -569,7 +632,7 @@ private fun Wochenblatt(
             Column(Modifier.width(NAMENSPALTE), verticalArrangement = Arrangement.spacedBy(ABSTAND)) {
                 zeilen.forEach { z ->
                     Box(Modifier.height(hoehe(z)).fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-                        NamensZelle(z, plan, abwesend, teamIds, woche)
+                        NamensZelle(z, plan, abwesend, teamIds, 0)
                     }
                 }
             }
@@ -581,22 +644,25 @@ private fun Wochenblatt(
                     .weight(1f)
                     .testTag("wochen-pager"),
             ) { seite ->
-                val tage = PlanSheet.weekDays(plan, seite)
+                // Nachbarwochen beim Wischen: ohne Hinweise, die gibt es für die gezeigte Woche.
+                val seitenPlan = if (seite == pager.currentPage) plan else wocheVon(wochen[seite])
+                val seitenHinweise = if (seite == pager.currentPage) hinweiseAn else emptyMap()
+                val tage = PlanSheet.weekDays(seitenPlan, 0)
                 Column(verticalArrangement = Arrangement.spacedBy(ABSTAND)) {
                     zeilen.forEach { z ->
                         Row(Modifier.height(hoehe(z)), horizontalArrangement = Arrangement.spacedBy(ABSTAND)) {
                             tage.forEach { tag ->
                                 val m = Modifier.weight(1f).fillMaxSize()
-                                val imPlan = PlanSheet.inPlan(plan, tag)
+                                val imPlan = PlanSheet.inPlan(seitenPlan, tag)
                                 when (z) {
                                     is BlattZeile.Person -> {
-                                        val schicht = plan.slotsOf(z.e.id, tag).firstOrNull()
+                                        val schicht = seitenPlan.slotsOf(z.e.id, tag).firstOrNull()
                                         SchichtZelle(
                                             person = z.e,
                                             tag = tag,
                                             schicht = schicht,
                                             abwesend = abwesendAm[z.e.id to tag],
-                                            hinweise = schicht?.let { hinweiseAn[z.e.id to it.key] }.orEmpty(),
+                                            hinweise = schicht?.let { seitenHinweise[z.e.id to it.key] }.orEmpty(),
                                             imPlan = imPlan,
                                             aenderbar = aenderbar,
                                             modifier = m,
@@ -604,13 +670,13 @@ private fun Wochenblatt(
                                     }
                                     BlattZeile.Aushilfen -> Box(m.padding(vertical = 2.dp).background(RandHell, RoundedCornerShape(3.dp)))
                                     BlattZeile.Offen -> OffenZelle(
-                                        anzahl = if (imPlan) PlanSheet.openOn(plan, tag, teamIds).size else 0,
+                                        anzahl = if (imPlan) PlanSheet.openOn(seitenPlan, tag, teamIds).size else 0,
                                         tag = tag,
                                         aenderbar = aenderbar,
                                         modifier = m,
                                     ) { offenAntippen(tag) }
                                     BlattZeile.Summe -> SummenZelle(
-                                        if (imPlan) PlanSheet.hours(PlanSheet.dayTotalMinutes(plan, tag, teamIds)) else "",
+                                        if (imPlan) PlanSheet.hours(PlanSheet.dayTotalMinutes(seitenPlan, tag, teamIds)) else "",
                                         m,
                                     )
                                 }
@@ -769,8 +835,8 @@ private fun Legende() {
 
 /** Alle Hinweise der Woche als Liste, antippen öffnet das Feld. */
 @Composable
-private fun WochenHinweise(plan: ShiftPlan, woche: Int, hinweise: List<Warning>, oeffnen: (Warning) -> Unit) {
-    val tage = PlanSheet.weekDays(plan, woche).toSet()
+private fun WochenHinweise(woche: ShiftPlan, hinweise: List<Warning>, oeffnen: (Warning) -> Unit) {
+    val tage = PlanSheet.weekDays(woche, 0).toSet()
     val dieseWoche = hinweise.filter { it.key.date in tage }.sortedWith(compareBy<Warning>({ it.key.date }, { it.severity }))
     if (dieseWoche.isEmpty()) return
     Column(Modifier.padding(horizontal = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {

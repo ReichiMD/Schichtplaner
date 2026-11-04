@@ -30,7 +30,7 @@ import java.io.File
 import java.time.DayOfWeek
 import java.time.LocalDate
 
-/** Wünsche-Kalender auf einem echten Android: Speichern, Antippen, Löschen einer Person. */
+/** Wünsche-Kalender auf einem echten Android: Speichern, Antippen, Ausscheiden einer Person. */
 @RunWith(AndroidJUnit4::class)
 class WuenscheOnDeviceTest {
 
@@ -150,7 +150,7 @@ class WuenscheOnDeviceTest {
     }
 
     @Test
-    fun personLoeschenNimmtIhreEintraegeMit() {
+    fun ausgeschiedenePersonBehaeltIhreEintraege() {
         val team = teamMit(Employee("a", "Ida", 120), Employee("b", "Ole", 80))
         val store = WuenscheStore(dir)
         warte { store.warten() }
@@ -161,11 +161,11 @@ class WuenscheOnDeviceTest {
         compose.setContent { TeamBereich(store = team, wuensche = store) }
 
         compose.onNodeWithTag("mitarbeiter-Ida").performClick()
-        compose.onNodeWithText("Ida aus dem Team löschen").performScrollTo().performClick()
-        compose.onNodeWithText("Die 2 eingetragenen Tage", substring = true).assertIsDisplayed()
-        compose.onNodeWithText("Löschen").performClick()
+        compose.onNodeWithText("Ida scheidet aus").performScrollTo().performClick()
+        compose.onNodeWithTag("ausscheiden").performClick()
 
-        assertEquals(listOf("Ole"), warte { team.warten() }.team.map { it.name })
-        assertEquals(listOf("b"), warte { store.warten() }.eintraege.map { it.employeeId })
+        assertEquals(listOf("Ole"), warte { team.warten() }.team.filter { !it.archived }.map { it.name })
+        // Nichts wird gelöscht: Idas Urlaub bleibt für die alten Wochen stehen.
+        assertEquals(listOf("a", "b", "a"), warte { store.warten() }.eintraege.map { it.employeeId })
     }
 }

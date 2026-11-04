@@ -65,6 +65,11 @@ data class Employee(
     val blockedWeekdays: Set<DayOfWeek> = emptySet(),
     /** Aushilfen werden nur eingeplant, wenn es ohne sie nicht geht. */
     val isBackup: Boolean = false,
+    /**
+     * Ausgeschieden: wird nicht mehr eingeplant und steht nicht mehr im Team, bleibt aber in den Wochen
+     * stehen, in denen sie gearbeitet hat.
+     */
+    val archived: Boolean = false,
 ) {
     fun canWork(kind: ShiftKind) = when (kind) {
         ShiftKind.EARLY -> canEarly
@@ -107,6 +112,11 @@ data class Shift(
     }
 }
 
+/** Eine Schicht eindeutig benannt: Tag, Vorlage und laufende Nummer. */
+data class ShiftRef(val date: LocalDate, val templateId: String, val slot: Int)
+
+val Shift.ref: ShiftRef get() = ShiftRef(date, template.id, slot)
+
 /** Gewichte der weichen Regeln. Höher = wichtiger. */
 data class Weights(
     val unfilledShift: Int = 10_000,
@@ -143,6 +153,15 @@ data class PlanningRequest(
     val workedDaysBefore: Map<String, Int> = emptyMap(),
     /** Ende der letzten Schicht vor dem Zeitraum (für die Ruhezeit am ersten Tag), je Mitarbeiter-ID. */
     val lastShiftEndBefore: Map<String, LocalDateTime> = emptyMap(),
+    /** Beginn der ersten schon geplanten Schicht nach dem Zeitraum (Ruhezeit zum Folgetag), je Mitarbeiter-ID. */
+    val firstShiftStartAfter: Map<String, LocalDateTime> = emptyMap(),
+    /**
+     * Die Schichten des Zeitraums, wenn sie schon feststehen (z. B. von Hand geänderte Zeiten).
+     * null = aus den Schichtvorlagen des Ladens erzeugen.
+     */
+    val shifts: List<Shift>? = null,
+    /** Von Hand eingetragen: Diese Schicht hat schon diese Person. Der Planer füllt nur den Rest. */
+    val fixed: Map<ShiftRef, String> = emptyMap(),
 ) {
     init {
         require(days in 1..MAX_DAYS) { "Planungszeitraum muss 1 bis $MAX_DAYS Tage lang sein" }

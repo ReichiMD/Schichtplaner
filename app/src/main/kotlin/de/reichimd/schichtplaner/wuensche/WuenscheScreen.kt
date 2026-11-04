@@ -55,6 +55,7 @@ import de.reichimd.schichtplaner.core.AbsenceType
 import de.reichimd.schichtplaner.core.Employee
 import de.reichimd.schichtplaner.core.Weekdays
 import de.reichimd.schichtplaner.core.wishes.Wishes
+import de.reichimd.schichtplaner.core.team.Team
 import de.reichimd.schichtplaner.team.TeamStore
 import de.reichimd.schichtplaner.team.team
 import de.reichimd.schichtplaner.ui.Akzent
@@ -132,11 +133,12 @@ internal fun WuenscheBereich(
             team.laedt || zustand.laedt -> Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = Akzent)
             }
-            team.team.isEmpty() -> Hinweis(
+            Team.active(team.team).isEmpty() -> Hinweis(
                 "Noch niemand im Team. Lege die Personen zuerst unter „Team“ an, dann kannst du hier " +
                     "Urlaub und Frei-Wünsche eintragen.",
             )
-            else -> Kalender(team.team, zustand, store, heute)
+            // Ausgeschiedene behalten ihre Einträge, stehen aber nicht mehr zur Auswahl.
+            else -> Kalender(Team.active(team.team), zustand, store, heute)
         }
     }
 }

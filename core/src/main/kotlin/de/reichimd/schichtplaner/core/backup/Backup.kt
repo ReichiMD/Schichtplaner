@@ -3,14 +3,13 @@ package de.reichimd.schichtplaner.core.backup
 import de.reichimd.schichtplaner.core.Absence
 import de.reichimd.schichtplaner.core.Employee
 import de.reichimd.schichtplaner.core.plan.PlanCodec
-import de.reichimd.schichtplaner.core.plan.ShiftPlan
+import de.reichimd.schichtplaner.core.plan.YearPlan
 import de.reichimd.schichtplaner.core.shop.ShopCodec
 import de.reichimd.schichtplaner.core.shop.ShopSettings
 import de.reichimd.schichtplaner.core.storage.DataFileException
 import de.reichimd.schichtplaner.core.storage.DataFileTooNewException
 import de.reichimd.schichtplaner.core.team.Team
 import de.reichimd.schichtplaner.core.team.TeamCodec
-import de.reichimd.schichtplaner.core.wishes.Wishes
 import de.reichimd.schichtplaner.core.wishes.WishesCodec
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
@@ -25,7 +24,7 @@ data class BackupData(
     val team: List<Employee>,
     val shop: ShopSettings,
     val wishes: List<Absence>,
-    val plan: ShiftPlan?,
+    val plan: YearPlan,
     /** Wann die Sicherung erstellt wurde (nur zur Anzeige). */
     val created: LocalDateTime? = null,
     /** Welche App-Version sie geschrieben hat (nur zur Anzeige). */
@@ -73,7 +72,7 @@ object BackupCodec {
             team = json.parseToJsonElement(TeamCodec.encode(data.team)),
             laden = json.parseToJsonElement(ShopCodec.encode(data.shop)),
             wuensche = json.parseToJsonElement(WishesCodec.encode(data.wishes)),
-            plan = json.parseToJsonElement(PlanCodec.encode(data.plan)),
+            plan = json.parseToJsonElement(PlanCodec.encodeYear(data.plan)),
         ),
     )
 
@@ -116,11 +115,13 @@ object BackupCodec {
         val team = lesen("Das Team") { TeamCodec.decode(teamText) }
         val shop = lesen("Der Laden") { ShopCodec.decode(ladenText) }
         val wishes = lesen("Der Wünsche-Kalender") { WishesCodec.decode(wuenscheText) }
-        val plan = lesen("Der Plan") { planText?.let { PlanCodec.decode(it) } }
+        // Sicherungen aus 0.1.8 haben den Plan noch im alten Format, decodeYear liest beide.
+        val plan = lesen("Der Plan") { planText?.let { PlanCodec.decodeYear(it) } ?: YearPlan.EMPTY }
 
         // Dieselben Regeln wie beim Speichern einer Person, sonst stünden Werte drin, die sich nicht mehr speichern lassen.
         team.forEach { e ->
-            Team.problems(e, team).firstOrNull()?.let {
+            // Ausgeschiedene nur für sich prüfen: Ihr Name darf inzwischen wieder vergeben sein.
+            Team.problems(e, if (e.archived) emptyList() else team).firstOrNull()?.let {
                 throw DataFileException("Das Team in der Sicherung passt nicht (${e.name.ifBlank { "ohne Namen" }}: ${it.message})")
             }
         }
@@ -138,26 +139,4 @@ object BackupCodec {
 
     /** Vorschlag für den Dateinamen, z. B. "schichtplaner-sicherung-2026-11-03.json". */
     fun fileName(day: LocalDate): String = "$FORMAT-$day.json"
-}
-
-/** Aufräumen im Wünsche-Kalender, beim Start der App und beim Einlesen einer Sicherung. */
-object WishCleanup {
-
-    /**
-     * Ab wann Einträge behalten werden: ab 1. Januar des Vorjahres (der Kalender zeigt ohnehin nur einen Monat zurück),
-     * aber nie etwas, das der gespeicherte Plan noch braucht.
-     */
-    fun keepFrom(today: LocalDate, plan: ShiftPlan?): LocalDate {
-        val lastYear = LocalDate.of(today.year - 1, 1, 1)
-        return if (plan != null && plan.firstDay.isBefore(lastYear)) plan.firstDay else lastYear
-    }
-
-    /**
-     * Entfernt alte Einträge und, wenn [teamIds] bekannt ist, Einträge von Personen, die nicht mehr im Team sind.
-     * [teamIds] = null heißt: Team unbekannt (z. B. gesperrt oder leer), dann bleiben alle Personen stehen.
-     */
-    fun clean(entries: List<Absence>, teamIds: Set<String>?, keepFrom: LocalDate): List<Absence> =
-        Wishes.normalize(
-            entries.filter { !it.date.isBefore(keepFrom) && (teamIds == null || it.employeeId in teamIds) },
-        )
 }

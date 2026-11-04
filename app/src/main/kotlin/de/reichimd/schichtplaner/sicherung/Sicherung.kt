@@ -6,7 +6,6 @@ import android.provider.DocumentsContract
 import de.reichimd.schichtplaner.BuildConfig
 import de.reichimd.schichtplaner.core.backup.BackupCodec
 import de.reichimd.schichtplaner.core.backup.BackupData
-import de.reichimd.schichtplaner.core.backup.WishCleanup
 import de.reichimd.schichtplaner.core.storage.DataFileException
 import de.reichimd.schichtplaner.core.storage.DataFileTooNewException
 import de.reichimd.schichtplaner.laden.LadenStore
@@ -24,7 +23,6 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileNotFoundException
 import java.io.IOException
-import java.time.LocalDate
 import java.time.LocalDateTime
 
 /** Die vier Speicher der App zusammen, damit Sicherung und Aufräumen alle auf einmal sehen. */
@@ -152,14 +150,13 @@ internal object Sicherung {
 
     /**
      * Ersetzt alles auf dem Handy durch die Sicherung. Vorher wird geprüft, dass kein Speicher gesperrt ist,
-     * damit nicht nur ein Teil ersetzt wird. Alte Monate und verwaiste Wünsche werden dabei aufgeräumt.
+     * damit nicht nur ein Teil ersetzt wird.
      */
     suspend fun einspielen(
         speicher: Speicher,
         daten: BackupData,
         /** Hierhin kommt vorher der jetzige Stand, damit eine falsch gewählte Datei nichts zerstört. null = nicht sichern. */
         rueckweg: File?,
-        heute: LocalDate = LocalDate.now(),
     ) {
         speicher.geladen()
         speicher.gesperrt()?.let {
@@ -177,26 +174,10 @@ internal object Sicherung {
                 throw SicherungsFehler("Der jetzige Stand ließ sich nicht vorher sichern (${e.message}). Es wurde nichts geändert.")
             }
         }
-        val teamIds = daten.team.map { it.id }.toSet().takeIf { it.isNotEmpty() }
-        val wuensche = WishCleanup.clean(daten.wishes, teamIds, WishCleanup.keepFrom(heute, daten.plan))
         val ok = speicher.team.ersetzen(daten.team) and
             speicher.laden.ersetzen(daten.shop) and
-            speicher.wuensche.ersetzen(wuensche) and
-            speicher.plan.ersetzenOderLeeren(daten.plan)
+            speicher.wuensche.ersetzen(daten.wishes) and
+            speicher.plan.ersetzen(daten.plan)
         if (!ok) throw SicherungsFehler("Die Sicherung wurde nur teilweise übernommen. Bitte noch einmal einspielen.")
-    }
-
-    /**
-     * Beim Start der App: alte Monate und Wünsche gelöschter Personen entfernen.
-     * Personen werden nur abgeglichen, wenn das Team sicher geladen ist und nicht leer.
-     */
-    suspend fun aufraeumen(speicher: Speicher, heute: LocalDate = LocalDate.now()) {
-        speicher.geladen()
-        val team = speicher.team.zustand.value
-        val plan = speicher.plan.zustand.value
-        // Ist der Plan gesperrt, kennen wir seinen Beginn nicht: dann lieber nichts Altes löschen.
-        if (!plan.bearbeitbar) return
-        val teamIds = if (team.bearbeitbar && team.team.isNotEmpty()) team.team.map { it.id }.toSet() else null
-        speicher.wuensche.aufraeumen(teamIds, WishCleanup.keepFrom(heute, plan.plan))
     }
 }

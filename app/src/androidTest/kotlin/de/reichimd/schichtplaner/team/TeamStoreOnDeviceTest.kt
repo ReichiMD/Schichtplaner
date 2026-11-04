@@ -51,13 +51,15 @@ class TeamStoreOnDeviceTest {
         val anna = Employee("a", " Anna ", 120, canEarly = false, blockedWeekdays = setOf(DayOfWeek.MONDAY))
         assertEquals(emptyList<String>(), store.speichern(anna))
         assertEquals(emptyList<String>(), store.speichern(Employee("b", "Ben", 80, isBackup = true)))
-        store.loeschen("b")
+        store.ausscheiden("b")
         assertEquals(emptyList<String>(), store.speichern(Employee("c", "Clara", 40)))
         warte(store)
 
         // Neue Instanz = wie nach einem Neustart der App.
         val danach = warte(TeamStore(dir))
-        assertEquals(listOf("Anna", "Clara"), danach.team.map { it.name })
+        // Ben ist ausgeschieden: bleibt gespeichert (für alte Wochen), aber hinter den Aktiven.
+        assertEquals(listOf("Anna", "Clara", "Ben"), danach.team.map { it.name })
+        assertEquals(listOf(false, false, true), danach.team.map { it.archived })
         assertEquals(setOf(DayOfWeek.MONDAY), danach.team[0].blockedWeekdays)
         assertFalse(danach.team[0].canEarly)
     }
