@@ -27,6 +27,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import de.reichimd.schichtplaner.core.plan.YearPlan
+import de.reichimd.schichtplaner.core.plan.YearPlans
+import de.reichimd.schichtplaner.core.shop.ShopSettings
+import de.reichimd.schichtplaner.ui.Auswahl
+import de.reichimd.schichtplaner.ui.TextMittel
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -308,11 +315,21 @@ internal object PlanPdf {
 
 /** Knöpfe unter dem Wochenblatt: PDF teilen (WhatsApp, Mail, Drive) und Drucken. */
 @Composable
-internal fun PdfKnoepfe(plan: ShiftPlan, leute: List<Employee>, abwesend: List<Absence>, modifier: Modifier = Modifier) {
+internal fun PdfKnoepfe(
+    jahresplan: YearPlan,
+    montag: LocalDate,
+    laden: ShopSettings,
+    leute: List<Employee>,
+    abwesend: List<Absence>,
+    modifier: Modifier = Modifier,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var arbeitet by remember { mutableStateOf(false) }
     var fehler by remember { mutableStateOf<String?>(null) }
+    // Wie viele Wochen ab der gezeigten aufs PDF kommen. Bisher plante die Filialleitung 2 Wochen im Voraus.
+    var wochen by rememberSaveable { mutableIntStateOf(2) }
+    val plan = YearPlans.weeks(jahresplan, montag, wochen, laden)
 
     fun los(aktion: (File) -> Unit) {
         if (arbeitet) return
@@ -337,6 +354,18 @@ internal fun PdfKnoepfe(plan: ShiftPlan, leute: List<Employee>, abwesend: List<A
     }
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("PDF ab dieser Woche", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextMittel)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(1, 2, 4).forEach { n ->
+                Auswahl(
+                    if (n == 1) "1 Woche" else "$n Wochen",
+                    gewaehlt = wochen == n,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("pdf-wochen-$n"),
+                ) { wochen = n }
+            }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(
                 onClick = { los { PlanPdf.teilen(context, it) } },

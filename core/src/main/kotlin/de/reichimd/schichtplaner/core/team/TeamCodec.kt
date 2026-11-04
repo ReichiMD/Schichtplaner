@@ -46,6 +46,8 @@ object TeamCodec {
         /** Wochentage als 1 (Montag) bis 7 (Sonntag), unabhängig von Sprache und Enum-Namen. */
         val blockedWeekdays: List<Int> = emptyList(),
         val isBackup: Boolean = false,
+        /** Ausgeschieden (ab 0.1.9). Ältere Dateien kennen das Feld nicht: dann im Team. */
+        val archived: Boolean = false,
     )
 
     fun encode(team: List<Employee>): String = json.encodeToString(
@@ -61,6 +63,7 @@ object TeamCodec {
                     canLate = it.canLate,
                     blockedWeekdays = it.blockedWeekdays.map(DayOfWeek::getValue).sorted(),
                     isBackup = it.isBackup,
+                    archived = it.archived,
                 )
             },
         ),
@@ -97,6 +100,7 @@ object TeamCodec {
                     DayOfWeek.of(day)
                 }.toSet(),
                 isBackup = s.isBackup,
+                archived = s.archived,
             )
         }
     }

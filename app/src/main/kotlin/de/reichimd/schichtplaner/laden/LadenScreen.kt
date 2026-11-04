@@ -69,6 +69,7 @@ import de.reichimd.schichtplaner.core.shop.ShopField
 import de.reichimd.schichtplaner.core.shop.ShopSettings
 import de.reichimd.schichtplaner.core.shop.TemplatePart
 import de.reichimd.schichtplaner.sicherung.SicherungKarte
+import de.reichimd.schichtplaner.core.team.Team
 import de.reichimd.schichtplaner.team.TeamStore
 import de.reichimd.schichtplaner.team.team
 import de.reichimd.schichtplaner.ui.Abschnitt
@@ -113,7 +114,7 @@ internal fun LadenBereich(
 
     val id = offen
     when {
-        id == null -> LadenUebersicht(zustand, store, team.team.map { it.monthlyHours }, oeffnen = { offen = it })
+        id == null -> LadenUebersicht(zustand, store, Team.active(team.team).map { it.monthlyHours }, oeffnen = { offen = it })
         id == ZEITEN -> OeffnungszeitenBearbeiten(zustand.laden, store, schliessen = { offen = null })
         else -> {
             val vorhanden = zustand.laden.templates.firstOrNull { it.id == id }
@@ -247,21 +248,6 @@ private fun LadenUebersicht(zustand: LadenZustand, store: LadenStore, teamMonats
                     vorschau.forEach { Text(it, fontSize = 14.sp, color = Schrift) }
                 }
                 if (t.staff > 1) Text("${t.staff} Personen", fontSize = 14.sp, color = TextMittel)
-            }
-        }
-
-        // Planungszeitraum
-        Abschnitt("Plan für wie viele Wochen?", "Gilt beim nächsten „Plan erstellen“.") {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Shop.PLAN_WEEKS.forEach { w ->
-                    Auswahl(
-                        "$w Wochen",
-                        gewaehlt = laden.planWeeks == w,
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("wochen-$w"),
-                    ) { if (zustand.bearbeitbar) store.speichern { it.copy(planWeeks = w) } }
-                }
             }
         }
 

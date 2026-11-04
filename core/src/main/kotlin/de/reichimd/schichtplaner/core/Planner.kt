@@ -10,6 +10,7 @@ import org.chocosolver.solver.search.strategy.selectors.variables.InputOrder
 import org.chocosolver.solver.variables.BoolVar
 import org.chocosolver.solver.variables.IntVar
 import java.time.Duration
+import java.time.LocalDate
 import kotlin.math.roundToInt
 
 /**
@@ -22,6 +23,8 @@ import kotlin.math.roundToInt
  * - Mindest-Ruhezeit zwischen zwei Schichten, auch zur letzten Schicht vor dem Zeitraum
  * - höchstens [PlanningRules.maxConsecutiveDays] Arbeitstage am Stück
  * - Aushilfen höchstens bis zu ihren (anteiligen) Monatsstunden
+ * - Von Hand eingetragene Schichten ([PlanningRequest.fixed]) bleiben, wie sie sind. Verstoßen sie selbst
+ *   gegen eine Regel, wird das hingenommen (die App zeigt es rot), aber nichts Neues kommt dazu.
  *
  * Weiche Regeln (werden gewichtet möglichst gut erfüllt):
  * - jede Schicht besetzen (sehr hohes Gewicht; geht es nicht, landet sie in [Plan.unfilled])
@@ -48,8 +51,19 @@ object Planner {
      * @param failLimit Rechenbudget unabhängig von der Geschwindigkeit des Geräts (null = nur Zeitgrenze).
      */
     fun plan(request: PlanningRequest, timeLimitMillis: Long = 15_000, failLimit: Long? = DEFAULT_FAIL_LIMIT): Plan {
-        val shifts = ShiftCalendar.shifts(request.firstDay, request.days, request.shop)
         val employees = request.employees
+        val employeeIndex = employees.withIndex().associate { (i, e) -> e.id to i }
+        // Feste Schichten von Personen, die der Planer nicht kennt, sind schlicht vergeben und nicht Teil der Rechnung.
+        val shifts = (request.shifts ?: ShiftCalendar.shifts(request.firstDay, request.days, request.shop))
+            .filter { s -> request.fixed[s.ref]?.let { it in employeeIndex } ?: true }
+        // Schicht-Index → Person-Index. Pro Person und Tag nur eine feste Schicht (mehr kann es nicht geben).
+        val fixedOf: Map<Int, Int> = buildMap {
+            val taken = mutableSetOf<Pair<Int, LocalDate>>()
+            for ((si, s) in shifts.withIndex()) {
+                val ei = request.fixed[s.ref]?.let { employeeIndex[it] } ?: continue
+                if (taken.add(ei to s.date)) put(si, ei)
+            }
+        }
         val rules = request.rules
         val weights = rules.weights
         val model = Model("Schichtplan")
@@ -72,16 +86,30 @@ object Planner {
             return Duration.between(lastEnd, s.start) >= minRest
         }
 
+        fun restedBeforeNextPlan(e: Employee, s: Shift): Boolean {
+            val nextStart = request.firstShiftStartAfter[e.id] ?: return true
+            return Duration.between(s.end, nextStart) >= minRest
+        }
+
         fun eligible(e: Employee, s: Shift): Boolean =
-            e.canWork(s.kind) &&
+            !e.archived &&
+                e.canWork(s.kind) &&
                 s.date.dayOfWeek !in e.blockedWeekdays &&
                 (e.id to s.date) !in blocked &&
-                restedSincePreviousPlan(e, s)
+                restedSincePreviousPlan(e, s) &&
+                restedBeforeNextPlan(e, s)
 
         // x[s][e]: Person e arbeitet Schicht s. Nur für zulässige Paare angelegt.
+        // Feste Schichten: nur eine Variable, fest auf 1, auch wenn die Person eigentlich nicht dürfte.
+        val fixedVars = mutableSetOf<IntVar>()
         val x: Array<Array<BoolVar?>> = Array(shifts.size) { si ->
+            val fixedEi = fixedOf[si]
             Array(employees.size) { ei ->
-                if (eligible(employees[ei], shifts[si])) model.boolVar("x_${si}_$ei") else null
+                when {
+                    fixedEi != null -> if (ei == fixedEi) model.boolVar("fest_${si}_$ei", true).also { fixedVars += it } else null
+                    eligible(employees[ei], shifts[si]) -> model.boolVar("x_${si}_$ei")
+                    else -> null
+                }
             }
         }
         val unfilled = Array(shifts.size) { model.boolVar("frei_$it") }
@@ -115,8 +143,16 @@ object Planner {
             for (ei in employees.indices) {
                 val va = x[a][ei] ?: continue
                 val vb = x[b][ei] ?: continue
+                // Zwei feste Schichten mit zu wenig Ruhe: von Hand so gewollt, nicht unlösbar machen.
+                if (va in fixedVars && vb in fixedVars) continue
                 model.arithm(va, "+", vb, "<=", 1).post()
             }
+        }
+
+        // Tage (Index), an denen eine Person schon fest eingetragen ist.
+        val dayIndex = dates.withIndex().associate { (i, d) -> d to i }
+        val fixedDayIdx = Array(employees.size) { ei ->
+            fixedOf.filterValues { it == ei }.keys.mapNotNull { dayIndex[shifts[it].date] }.toSet()
         }
 
         // Höchstens maxConsecutiveDays Tage am Stück, inklusive der Tage direkt vor dem Zeitraum.
@@ -130,7 +166,8 @@ object Planner {
                 val inside = (maxOf(windowStart, 0)..minOf(windowEnd, dates.size - 1))
                     .mapNotNull { worksOn[ei][it] }
                 val alreadyWorked = if (windowStart < 0) -windowStart else 0
-                val allowed = maxRun - alreadyWorked
+                val fixedDays = (maxOf(windowStart, 0)..minOf(windowEnd, dates.size - 1)).count { it in fixedDayIdx[ei] }
+                val allowed = maxOf(maxRun - alreadyWorked, fixedDays)
                 if (inside.size <= allowed) continue
                 model.sum(inside.toTypedArray<IntVar>(), "<=", allowed).post()
             }
@@ -159,7 +196,8 @@ object Planner {
         }
 
         // Monatsstunden anteilig auf den Zeitraum umgerechnet, in Viertelstunden.
-        val regulars = employees.indices.filter { !employees[it].isBackup }
+        // Ausgeschiedene nicht: Sie bekommen nichts Neues und würden sonst den Wochenend-Anteil der anderen drücken.
+        val regulars = employees.indices.filter { !employees[it].isBackup && !employees[it].archived }
         // Urlaubs- und Krankheitstage verringern das Soll anteilig, sonst würde das volle Soll
         // in die restlichen Tage gepresst.
         val absentDays = blocked.groupingBy { it.first }.eachCount()
@@ -174,7 +212,9 @@ object Planner {
             val idx = shifts.indices.filter { x[it][ei] != null }
             if (idx.isEmpty()) continue
             val vars = idx.map<Int, IntVar> { x[it][ei]!! }.toTypedArray()
-            val cap = targetUnits(employees[ei])
+            // Von Hand darüber hinaus eingetragen: dann eben das, aber nichts mehr dazu.
+            val fixedUnits = idx.filter { si -> x[si][ei]!! in fixedVars }.sumOf { si -> units(shifts[si]) }
+            val cap = maxOf(targetUnits(employees[ei]), fixedUnits)
             model.scalar(vars, idx.map { units(shifts[it]) }.toIntArray(), "<=", cap).post()
         }
 

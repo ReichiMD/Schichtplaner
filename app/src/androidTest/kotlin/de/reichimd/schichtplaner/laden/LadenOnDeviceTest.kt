@@ -133,15 +133,13 @@ class LadenOnDeviceTest {
     }
 
     @Test
-    fun beispielUebernehmenUndWochenWaehlen() {
+    fun beispielUebernehmen() {
         val store = LadenStore(dir)
         warte(store)
         compose.setContent { LadenBereich(store = store) }
 
         compose.onNodeWithTag("beispiel-uebernehmen").performClick()
-        compose.onNodeWithTag("wochen-4").performScrollTo().performClick()
         val z = warte(store)
         assertTrue(z.eingerichtet)
-        assertEquals(4, z.laden.planWeeks)
     }
 }

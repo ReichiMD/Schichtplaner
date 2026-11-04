@@ -130,4 +130,35 @@ class TeamTest {
         assertEquals(team, Team.move(team, "3", up = false))
         assertEquals(team, Team.move(team, "x", up = true))
     }
+
+    @Test
+    fun ausscheidenUndZurueckholen() {
+        val clara = Employee("3", "Clara", 100)
+        val team = Team.archive(listOf(anna, ben, clara), "1")
+        assertEquals(listOf(ben, clara, anna.copy(archived = true)), team)
+        assertEquals(listOf(ben, clara), Team.active(team))
+        // Verschieben überspringt Ausgeschiedene, sie selbst lassen sich nicht verschieben.
+        assertEquals(team, Team.move(team, "3", up = false))
+        assertEquals(team, Team.move(team, "1", up = true))
+        assertEquals(listOf(ben, clara, anna), Team.restore(team, "1"))
+        assertEquals(team, Team.restore(team, "2")) // ist ja nicht ausgeschieden
+        // Neue Person kommt vor die Ausgeschiedenen.
+        val dora = Employee("4", "Dora", 40)
+        assertEquals(listOf(ben, clara, dora, anna.copy(archived = true)), Team.upsert(team, dora))
+    }
+
+    @Test
+    fun ausgeschiedeneBlockierenKeinenNamen() {
+        val alt = anna.copy(archived = true)
+        assertEquals(emptyList(), Team.problems(Employee("9", "Anna", 80), listOf(alt, ben)))
+        assertTrue(Team.problems(Employee("9", "Ben", 80), listOf(alt, ben)).isNotEmpty())
+    }
+
+    @Test
+    fun ausgeschiedenWirdGespeichert() {
+        val team = listOf(anna, ben.copy(archived = true))
+        assertEquals(team, TeamCodec.decode(TeamCodec.encode(team)))
+        // Alte Datei ohne das Feld: alle im Team.
+        assertEquals(listOf(anna), TeamCodec.decode("""{"version":1,"employees":[{"id":"1","name":"Anna","monthlyHours":120}]}"""))
+    }
 }

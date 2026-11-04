@@ -15,6 +15,7 @@ import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -71,11 +72,16 @@ class TeamScreenOnDeviceTest {
         compose.onNodeWithTag("speichern").performClick()
         compose.onNodeWithText("105 h / Monat").assertIsDisplayed()
 
-        // Löschen mit Nachfrage.
+        // Ausscheiden mit Nachfrage: Ida steht danach unter "Ausgeschieden" und kann zurück.
         compose.onNodeWithTag("mitarbeiter-Ida").performClick()
-        compose.onNodeWithText("Ida aus dem Team löschen").performScrollTo().performClick()
-        compose.onNodeWithText("Löschen").performClick()
-        compose.onNodeWithText("Noch niemand im Team.").assertIsDisplayed()
+        compose.onNodeWithText("Ida scheidet aus").performScrollTo().performClick()
+        compose.onNodeWithTag("ausscheiden").performClick()
+        compose.onNodeWithText("Ausgeschieden").assertIsDisplayed()
+        val id = runBlocking { withTimeout(10_000) { store.warten() } }.team.single().id
+        assertTrue(runBlocking { withTimeout(10_000) { store.warten() } }.team.single().archived)
+        compose.onNodeWithTag("zurueck-$id").performClick()
+        compose.onNodeWithTag("mitarbeiter-Ida").assertIsDisplayed()
+        assertFalse(runBlocking { withTimeout(10_000) { store.warten() } }.team.single().archived)
     }
 
     @Test

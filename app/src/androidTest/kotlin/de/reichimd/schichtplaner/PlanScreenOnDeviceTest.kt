@@ -2,7 +2,7 @@ package de.reichimd.schichtplaner
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
-import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -17,7 +17,9 @@ import androidx.test.platform.app.InstrumentationRegistry
 import de.reichimd.schichtplaner.core.Employee
 import de.reichimd.schichtplaner.core.ShiftKind
 import de.reichimd.schichtplaner.core.plan.PlanSlot
-import de.reichimd.schichtplaner.core.plan.ShiftPlan
+import de.reichimd.schichtplaner.core.plan.YearPlan
+import de.reichimd.schichtplaner.core.plan.YearPlans
+import de.reichimd.schichtplaner.core.shop.Shop
 import de.reichimd.schichtplaner.core.plan.SlotKey
 import de.reichimd.schichtplaner.laden.LadenStore
 import de.reichimd.schichtplaner.plan.PlanScreen
@@ -29,7 +31,8 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -37,7 +40,7 @@ import java.io.File
 import java.time.LocalDate
 import java.time.LocalTime
 
-/** Plan erstellen, Wochen wischen, Schichten von Hand ändern und speichern. */
+/** Kalender wischen, Rest ausfüllen, Schichten von Hand ändern und speichern. */
 @RunWith(AndroidJUnit4::class)
 class PlanScreenOnDeviceTest {
 
@@ -56,36 +59,43 @@ class PlanScreenOnDeviceTest {
 
     private fun <T> warte(block: suspend () -> T): T = runBlocking { withTimeout(10_000) { block() } }
 
+    /** Fester Tag, damit der Test jedes Jahr gleich läuft: Mittwoch, 4. November 2026 (KW 45). */
+    private val heute = LocalDate.of(2026, 11, 4)
+
     @Test
-    fun erstellenWischenUndNachNeustartNochDa() {
+    fun wischenUndRestAusfuellenNurFuerDieseWoche() {
         val planStore = PlanStore(dir)
         compose.setContent {
-            PlanScreen(TeamStore(dir), LadenStore(dir), WuenscheStore(dir), planStore)
+            PlanScreen(TeamStore(dir), LadenStore(dir), WuenscheStore(dir), planStore, heute = heute)
         }
-        compose.onNodeWithText("Plan erstellen", substring = true).performClick()
-        compose.waitUntil(60_000) { compose.onAllNodes(hasTestTag("wochen-pager")).fetchSemanticsNodes().isNotEmpty() }
-
-        compose.onNodeWithText("Woche 1 von", substring = true).performScrollTo().assertIsDisplayed()
-        compose.onNodeWithTag("wochen-pager").performScrollTo().performTouchInput { swipeLeft() }
-        compose.waitForIdle()
-        compose.onNodeWithText("Woche 2 von", substring = true).performScrollTo().assertIsDisplayed()
-        // Wochentage bleiben oben stehen, sie gehören nicht zum Blätterbereich.
-        compose.onNodeWithText("Mo").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithTag("wochen-pager").performScrollTo().performTouchInput { swipeRight() }
-        compose.waitForIdle()
-        compose.onNodeWithText("Woche 1 von", substring = true).performScrollTo().assertIsDisplayed()
+        // Ohne Plan ist der Kalender trotzdem da, mit der aktuellen Woche.
+        compose.onNodeWithTag("wochen-titel").assertTextContains("02.11. – 08.11.")
         compose.onNodeWithText("ges. Std.").performScrollTo().assertIsDisplayed()
 
-        warte { planStore.warten() }
-        assertNotNull(warte { PlanStore(dir).warten() }.plan)
+        compose.onNodeWithTag("wochen-pager").performScrollTo().performTouchInput { swipeLeft() }
+        compose.waitForIdle()
+        compose.onNodeWithTag("wochen-titel").performScrollTo().assertTextContains("09.11. – 15.11.")
+        compose.onNodeWithTag("heute").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("wochen-titel").assertTextContains("02.11. – 08.11.")
 
-        // Ein zweites Mal fragt nach, bevor der Plan mit Handänderungen ersetzt wird.
-        compose.onNodeWithText("Neuen Plan erstellen", substring = true).performScrollTo().performClick()
-        compose.onNodeWithTag("neu-erstellen").assertIsDisplayed()
-        compose.onNodeWithText("Abbrechen").performClick()
+        compose.onNodeWithTag("rest-ausfuellen").performScrollTo().performClick()
+        compose.waitUntil(60_000) { compose.onAllNodes(hasText("Ausgefüllt", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+
+        val p = warte { planStore.warten() }.plan
+        val mo = LocalDate.of(2026, 11, 2)
+        assertTrue(p.hasWeek(mo))
+        assertFalse(p.hasWeek(mo.plusWeeks(1)))
+        assertTrue(p.slots.any { it.employeeId != null })
+        assertEquals(p, warte { PlanStore(dir).warten() }.plan)
+
+        // Leeren mit Nachfrage: danach wieder ungeplant.
+        compose.onNodeWithTag("woche-leeren").performScrollTo().performClick()
+        compose.onNodeWithTag("leeren-ok").performClick()
+        assertTrue(warte { planStore.warten() }.plan.isEmpty())
     }
 
-    /** Montag, weit genug in der Zukunft, damit der Test jedes Jahr gleich läuft. */
+    /** Montag einer Woche, die der Test als "diese Woche" anzeigt. */
     private val mo = LocalDate.of(2030, 1, 7)
 
     private fun slot(id: String, kind: ShiftKind, von: LocalTime, bis: LocalTime, wer: String?) =
@@ -101,8 +111,7 @@ class PlanScreenOnDeviceTest {
         val planStore = PlanStore(dir)
         warte { planStore.warten() }
         planStore.ersetzen(
-            ShiftPlan(
-                mo, 7,
+            YearPlan(
                 listOf(
                     slot("f1", ShiftKind.EARLY, LocalTime.of(4, 30), LocalTime.of(11, 30), "a"),
                     slot("f2", ShiftKind.EARLY, LocalTime.of(5, 30), LocalTime.of(12, 30), null),
@@ -113,14 +122,14 @@ class PlanScreenOnDeviceTest {
         warte { team.warten() }
         warte { planStore.warten() }
 
-        compose.setContent { PlanScreen(team, LadenStore(dir), WuenscheStore(dir), planStore) }
+        compose.setContent { PlanScreen(team, LadenStore(dir), WuenscheStore(dir), planStore, heute = mo) }
         compose.onNodeWithTag("zusammenfassung").performScrollTo().assertTextContains("1 Schicht offen", substring = true)
 
         // Anna übernimmt die Spätschicht, Ben bekommt dafür ihre Frühschicht.
         compose.onNodeWithTag("zelle-a-$mo").performScrollTo().performClick()
         compose.onNodeWithTag("wahl-sp-0").performScrollTo().performClick()
         compose.onNodeWithTag("fertig").performScrollTo().performClick()
-        var p = warte { planStore.warten() }.plan!!
+        var p = YearPlans.week(warte { planStore.warten() }.plan, mo, Shop.EXAMPLE)
         assertEquals("a", p.slot(SlotKey(mo, "sp", 0))!!.employeeId)
         assertEquals("b", p.slot(SlotKey(mo, "f1", 0))!!.employeeId)
 
@@ -128,7 +137,7 @@ class PlanScreenOnDeviceTest {
         compose.onNodeWithTag("offen-$mo").performScrollTo().performClick()
         compose.onNodeWithTag("person-c").performScrollTo().performClick()
         compose.onNodeWithTag("fertig").performScrollTo().performClick()
-        p = warte { planStore.warten() }.plan!!
+        p = YearPlans.week(warte { planStore.warten() }.plan, mo, Shop.EXAMPLE)
         assertEquals("c", p.slot(SlotKey(mo, "f2", 0))!!.employeeId)
         compose.onNodeWithTag("zusammenfassung").performScrollTo().assertTextContains("Alle Schichten besetzt", substring = true)
 
@@ -137,15 +146,15 @@ class PlanScreenOnDeviceTest {
         compose.onNodeWithContentDescription("Beginn später").performScrollTo().performClick()
         compose.onNodeWithTag("beginn").assertTextContains("5:45")
         compose.onNodeWithTag("fertig").performScrollTo().performClick()
-        p = warte { planStore.warten() }.plan!!
+        p = YearPlans.week(warte { planStore.warten() }.plan, mo, Shop.EXAMPLE)
         assertEquals(mo.atTime(5, 45), p.slot(SlotKey(mo, "f2", 0))!!.start)
 
         // Frei geben: Schicht wird wieder offen.
         compose.onNodeWithTag("zelle-b-$mo").performScrollTo().performClick()
         compose.onNodeWithTag("frei-geben").performScrollTo().performClick()
         compose.onNodeWithTag("fertig").performScrollTo().performClick()
-        p = warte { planStore.warten() }.plan!!
+        p = YearPlans.week(warte { planStore.warten() }.plan, mo, Shop.EXAMPLE)
         assertEquals(null, p.slot(SlotKey(mo, "f1", 0))!!.employeeId)
-        assertEquals(p, warte { PlanStore(dir).warten() }.plan)
+        assertEquals(warte { planStore.warten() }.plan, warte { PlanStore(dir).warten() }.plan)
     }
 }

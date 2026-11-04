@@ -19,7 +19,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -27,7 +26,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -35,8 +33,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import de.reichimd.schichtplaner.laden.LadenBereich
 import de.reichimd.schichtplaner.plan.PlanScreen
-import de.reichimd.schichtplaner.sicherung.Sicherung
-import de.reichimd.schichtplaner.sicherung.Speicher
 import de.reichimd.schichtplaner.team.TeamBereich
 import de.reichimd.schichtplaner.ui.Akzent
 import de.reichimd.schichtplaner.ui.Hintergrund
@@ -69,10 +65,6 @@ private enum class Bereich(val titel: String) { PLAN("Plan"), WUENSCHE("Wünsche
 private fun Hauptbereich() {
     var bereich by rememberSaveable { mutableStateOf(Bereich.PLAN) }
     var bearbeitet by remember { mutableStateOf(false) }
-
-    // Einmal je Start: alte Monate und Wünsche gelöschter Personen aus dem Kalender entfernen.
-    val context = LocalContext.current.applicationContext
-    LaunchedEffect(Unit) { Sicherung.aufraeumen(Speicher.get(context)) }
 
     // Zurück in Wünsche, Team oder Laden führt erst zum Plan, statt die App zu schließen.
     BackHandler(enabled = bereich != Bereich.PLAN && !bearbeitet) { bereich = Bereich.PLAN }

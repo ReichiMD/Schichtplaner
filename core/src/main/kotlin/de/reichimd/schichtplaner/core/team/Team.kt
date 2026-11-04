@@ -53,7 +53,8 @@ object Team {
         when {
             name.isEmpty() -> add(TeamField.NAME, "Bitte einen Vornamen eingeben.")
             name.length > MAX_NAME_LENGTH -> add(TeamField.NAME, "Der Name ist zu lang (höchstens $MAX_NAME_LENGTH Zeichen).")
-            others.any { it.id != employee.id && cleanName(it.name).equals(name, ignoreCase = true) } ->
+            // Ausgeschiedene zählen nicht: Ein neuer Mitarbeiter darf wie ein früherer heißen.
+            others.any { it.id != employee.id && !it.archived && cleanName(it.name).equals(name, ignoreCase = true) } ->
                 add(TeamField.NAME, "„$name“ gibt es schon. Bitte unterscheidbar machen, z. B. „$name B.“")
         }
         if (employee.monthlyHours !in MIN_HOURS..MAX_HOURS) {
@@ -68,14 +69,39 @@ object Team {
         return result
     }
 
-    /** Fügt einen neuen Mitarbeiter hinten an oder ersetzt den mit gleicher ID an seiner Stelle. */
+    /**
+     * Fügt einen neuen Mitarbeiter hinter den letzten Aktiven an (vor die Ausgeschiedenen)
+     * oder ersetzt den mit gleicher ID an seiner Stelle.
+     */
     fun upsert(team: List<Employee>, employee: Employee): List<Employee> {
         val cleaned = employee.copy(name = cleanName(employee.name))
         val index = team.indexOfFirst { it.id == cleaned.id }
-        return if (index < 0) team + cleaned else team.toMutableList().also { it[index] = cleaned }
+        if (index >= 0) return team.toMutableList().also { it[index] = cleaned }
+        val at = if (cleaned.archived) team.size else team.indexOfLast { !it.archived } + 1
+        return team.toMutableList().also { it.add(at, cleaned) }
     }
 
     fun remove(team: List<Employee>, id: String): List<Employee> = team.filterNot { it.id == id }
+
+    /** Wer gerade im Team ist (ohne Ausgeschiedene). */
+    fun active(team: List<Employee>): List<Employee> = team.filter { !it.archived }
+
+    /**
+     * Person scheidet aus: Sie bleibt in der Liste (für alte Wochen), wird aber nicht mehr eingeplant
+     * und steht nicht mehr im Team. Sie rückt ans Ende, damit die Reihenfolge der anderen bleibt.
+     */
+    fun archive(team: List<Employee>, id: String): List<Employee> {
+        val e = team.firstOrNull { it.id == id } ?: return team
+        return team.filterNot { it.id == id } + e.copy(archived = true)
+    }
+
+    /** Ausgeschiedene Person kommt zurück ins Team, hinten angehängt. */
+    fun restore(team: List<Employee>, id: String): List<Employee> {
+        val e = team.firstOrNull { it.id == id && it.archived } ?: return team
+        val rest = team.filterNot { it.id == id }
+        val lastActive = rest.indexOfLast { !it.archived }
+        return rest.toMutableList().also { it.add(lastActive + 1, e.copy(archived = false)) }
+    }
 
     /**
      * Person in der Liste eine Stelle nach oben ([up]) oder unten schieben. So stehen die Zeilen im Plan
@@ -83,9 +109,13 @@ object Team {
      */
     fun move(team: List<Employee>, id: String, up: Boolean): List<Employee> {
         val index = team.indexOfFirst { it.id == id }
-        if (index < 0) return team
-        val other = if (up) index - 1 else index + 1
-        if (other !in team.indices) return team
+        if (index < 0 || team[index].archived) return team
+        // Ausgeschiedene sind in der Liste unsichtbar: mit dem nächsten Sichtbaren tauschen.
+        val other = if (up) {
+            (index - 1 downTo 0).firstOrNull { !team[it].archived }
+        } else {
+            (index + 1 until team.size).firstOrNull { !team[it].archived }
+        } ?: return team
         return team.toMutableList().also { java.util.Collections.swap(it, index, other) }
     }
 

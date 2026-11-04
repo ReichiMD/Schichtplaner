@@ -16,7 +16,11 @@ import java.time.format.DateTimeParseException
  */
 object PlanCodec {
 
+    /** Format eines einzelnen Zeitraums (bis Version 0.1.8 so in plan.json). */
     const val VERSION = 1
+
+    /** plan.json ab Version 0.1.9: alle Wochen als eine Liste von Schichten. Liest auch Version 1. */
+    const val YEAR_VERSION = 2
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -50,6 +54,72 @@ object PlanCodec {
         val employeeId: String? = null,
     )
 
+    @Serializable
+    private data class FileAny(
+        val version: Int,
+        val plan: StoredPlan? = null,
+        val slots: List<StoredSlot> = emptyList(),
+    )
+
+    private fun stored(it: PlanSlot) = StoredSlot(
+        date = it.date.toString(),
+        templateId = it.key.templateId,
+        slot = it.key.slot,
+        name = it.name,
+        kind = kindCode(it.kind),
+        start = it.start.toString(),
+        end = it.end.toString(),
+        employeeId = it.employeeId,
+    )
+
+    private fun slot(s: StoredSlot): PlanSlot {
+        if (s.templateId.isBlank()) throw DataFileException("Schicht ohne Vorlage")
+        val kind = when (s.kind) {
+            "early" -> ShiftKind.EARLY
+            "late" -> ShiftKind.LATE
+            else -> throw DataFileException("Unbekannte Schichtart ${s.kind}")
+        }
+        val date = LocalDate.parse(s.date)
+        val start = LocalDateTime.parse(s.start)
+        val end = LocalDateTime.parse(s.end)
+        if (start.toLocalDate() != date) throw DataFileException("Schicht beginnt nicht an ihrem Tag")
+        return PlanSlot(
+            key = SlotKey(date, s.templateId, s.slot),
+            name = s.name,
+            kind = kind,
+            start = start,
+            end = end,
+            employeeId = s.employeeId?.takeIf { it.isNotBlank() },
+        )
+    }
+
+    fun encodeYear(plan: YearPlan): String = json.encodeToString(
+        FileAny.serializer(),
+        FileAny(version = YEAR_VERSION, slots = plan.slots.sortedWith(ShiftPlan.ORDER).map(::stored)),
+    )
+
+    /** Liest plan.json in beiden Formaten. @throws DataFileException wenn der Text kein gültiger Plan ist. */
+    fun decodeYear(text: String): YearPlan {
+        val file = try {
+            json.decodeFromString(FileAny.serializer(), text)
+        } catch (e: SerializationException) {
+            throw DataFileException("Plan ist kein gültiges Format", e)
+        } catch (e: IllegalArgumentException) {
+            throw DataFileException("Plan ist kein gültiges Format", e)
+        }
+        if (file.version > YEAR_VERSION) throw DataFileTooNewException(file.version, "Plan")
+        if (file.version < 1) throw DataFileException("Unbekannte Version ${file.version}")
+        // Version 1: ein Zeitraum, mit dessen eigenen Prüfungen.
+        if (file.version == 1) return YearPlan.of(decode(text))
+        return try {
+            YearPlan(file.slots.map(::slot))
+        } catch (e: DateTimeParseException) {
+            throw DataFileException("Ungültiges Datum im Plan", e)
+        } catch (e: IllegalArgumentException) {
+            throw DataFileException("Plan ist ungültig: ${e.message}", e)
+        }
+    }
+
     private fun kindCode(k: ShiftKind) = when (k) {
         ShiftKind.EARLY -> "early"
         ShiftKind.LATE -> "late"
@@ -63,18 +133,7 @@ object PlanCodec {
                 StoredPlan(
                     firstDay = p.firstDay.toString(),
                     days = p.days,
-                    slots = p.slots.sortedWith(ShiftPlan.ORDER).map {
-                        StoredSlot(
-                            date = it.date.toString(),
-                            templateId = it.key.templateId,
-                            slot = it.key.slot,
-                            name = it.name,
-                            kind = kindCode(it.kind),
-                            start = it.start.toString(),
-                            end = it.end.toString(),
-                            employeeId = it.employeeId,
-                        )
-                    },
+                    slots = p.slots.sortedWith(ShiftPlan.ORDER).map(::stored),
                 )
             },
         ),
@@ -97,26 +156,7 @@ object PlanCodec {
             ShiftPlan(
                 firstDay = LocalDate.parse(p.firstDay),
                 days = p.days,
-                slots = p.slots.map { s ->
-                    if (s.templateId.isBlank()) throw DataFileException("Schicht ohne Vorlage")
-                    val kind = when (s.kind) {
-                        "early" -> ShiftKind.EARLY
-                        "late" -> ShiftKind.LATE
-                        else -> throw DataFileException("Unbekannte Schichtart ${s.kind}")
-                    }
-                    val date = LocalDate.parse(s.date)
-                    val start = LocalDateTime.parse(s.start)
-                    val end = LocalDateTime.parse(s.end)
-                    if (start.toLocalDate() != date) throw DataFileException("Schicht beginnt nicht an ihrem Tag")
-                    PlanSlot(
-                        key = SlotKey(date, s.templateId, s.slot),
-                        name = s.name,
-                        kind = kind,
-                        start = start,
-                        end = end,
-                        employeeId = s.employeeId?.takeIf { it.isNotBlank() },
-                    )
-                },
+                slots = p.slots.map(::slot),
             )
         } catch (e: DateTimeParseException) {
             throw DataFileException("Ungültiges Datum im Plan", e)

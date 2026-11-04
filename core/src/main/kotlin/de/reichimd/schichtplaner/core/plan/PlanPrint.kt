@@ -71,9 +71,12 @@ object PlanPrint {
             hours = PlanSheet.hours(PlanSheet.paidMinutes(plan, e.id, week)),
         )
 
+        // Ausgeschiedene nur in Wochen, in denen sie gearbeitet haben.
+        val working = plan.slots.filter { it.date in days }.mapNotNull { it.employeeId }.toSet()
+        val shown = employees.filter { !it.archived || it.id in working }
         val rows = buildList<PrintRow> {
-            employees.filter { !it.isBackup }.forEach { add(person(it)) }
-            val backups = employees.filter { it.isBackup }
+            shown.filter { !it.isBackup }.forEach { add(person(it)) }
+            val backups = shown.filter { it.isBackup }
             if (backups.isNotEmpty()) {
                 add(PrintRow.Section(BACKUP_SECTION))
                 backups.forEach { add(person(it)) }

@@ -39,6 +39,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import de.reichimd.schichtplaner.core.backup.BackupCodec
 import de.reichimd.schichtplaner.core.backup.BackupData
+import de.reichimd.schichtplaner.core.plan.YearPlans
 import de.reichimd.schichtplaner.ui.Akzent
 import de.reichimd.schichtplaner.ui.Fehler
 import de.reichimd.schichtplaner.ui.RandHell
@@ -54,7 +55,6 @@ import java.time.format.DateTimeFormatter
 
 private val TAG = DateTimeFormatter.ofPattern("dd.MM.yyyy")
 private val TAG_ZEIT = DateTimeFormatter.ofPattern("dd.MM.yyyy, HH:mm")
-private val TAG_KURZ = DateTimeFormatter.ofPattern("dd.MM.")
 
 /** Hält Sichern und Einspielen über Drehen des Handys hinweg. */
 internal class SicherungViewModel : ViewModel() {
@@ -133,13 +133,14 @@ internal class SicherungViewModel : ViewModel() {
     fun meldungGelesen() { meldung = null }
 }
 
-/** "8 Personen, 23 Kalendereinträge, Plan 02.11. – 15.11." */
+/** "8 Personen, 23 Kalendereinträge, 5 geplante Wochen" */
 internal fun beschreibung(d: BackupData): String = buildString {
     append(if (d.team.size == 1) "1 Person" else "${d.team.size} Personen")
     append(", ")
     append(if (d.wishes.size == 1) "1 Kalendereintrag" else "${d.wishes.size} Kalendereinträge")
     append(", ")
-    append(d.plan?.let { "Plan ${it.firstDay.format(TAG_KURZ)} – ${it.lastDay.format(TAG_KURZ)}" } ?: "kein Plan")
+    val wochen = d.plan.slots.map { YearPlans.monday(it.date) }.distinct().size
+    append(if (wochen == 0) "kein Plan" else if (wochen == 1) "1 geplante Woche" else "$wochen geplante Wochen")
 }
 
 /**
