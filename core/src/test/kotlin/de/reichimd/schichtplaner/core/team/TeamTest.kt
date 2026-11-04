@@ -142,6 +142,9 @@ class TeamTest {
         assertEquals(team, Team.move(team, "1", up = true))
         assertEquals(listOf(ben, clara, anna), Team.restore(team, "1"))
         assertEquals(team, Team.restore(team, "2")) // ist ja nicht ausgeschieden
+        // Neue Person kommt vor die Ausgeschiedenen.
+        val dora = Employee("4", "Dora", 40)
+        assertEquals(listOf(ben, clara, dora, anna.copy(archived = true)), Team.upsert(team, dora))
     }
 
     @Test

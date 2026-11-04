@@ -69,11 +69,16 @@ object Team {
         return result
     }
 
-    /** Fügt einen neuen Mitarbeiter hinten an oder ersetzt den mit gleicher ID an seiner Stelle. */
+    /**
+     * Fügt einen neuen Mitarbeiter hinter den letzten Aktiven an (vor die Ausgeschiedenen)
+     * oder ersetzt den mit gleicher ID an seiner Stelle.
+     */
     fun upsert(team: List<Employee>, employee: Employee): List<Employee> {
         val cleaned = employee.copy(name = cleanName(employee.name))
         val index = team.indexOfFirst { it.id == cleaned.id }
-        return if (index < 0) team + cleaned else team.toMutableList().also { it[index] = cleaned }
+        if (index >= 0) return team.toMutableList().also { it[index] = cleaned }
+        val at = if (cleaned.archived) team.size else team.indexOfLast { !it.archived } + 1
+        return team.toMutableList().also { it.add(at, cleaned) }
     }
 
     fun remove(team: List<Employee>, id: String): List<Employee> = team.filterNot { it.id == id }
